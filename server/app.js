@@ -42,8 +42,9 @@ export function createApp(options = {}) {
 
     const controller = new AbortController();
     let runId = null;
-    req.on('close', () => {
-      if (!res.writableEnded) controller.abort(new Error('Client aborted'));
+    let responseFinished = false;
+    res.on('close', () => {
+      if (!responseFinished && !controller.signal.aborted) controller.abort(new Error('Client aborted'));
       if (runId) controllers.delete(runId);
     });
 
@@ -57,7 +58,8 @@ export function createApp(options = {}) {
       writeSse(res, { type: 'run_failed', error: safePublicError(error) });
     } finally {
       if (runId) controllers.delete(runId);
-      res.end();
+      responseFinished = true;
+      if (!res.destroyed && !res.writableEnded) res.end();
     }
   });
 
@@ -92,6 +94,7 @@ export function createApp(options = {}) {
 }
 
 function writeSse(res, event) {
+  if (res.destroyed || res.writableEnded) return;
   res.write(`event: ${event.type}\n`);
   res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
