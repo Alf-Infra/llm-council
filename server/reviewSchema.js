@@ -4,14 +4,18 @@ export function validateReviewPayload(payload, anonymousIds, criteriaIds) {
   if (!Array.isArray(payload.ranking)) return { ok: false, error: 'ranking fehlt oder ist keine Liste.' };
 
   const ids = new Set(anonymousIds);
+  const criteria = new Set(criteriaIds);
   const seen = new Set();
   for (const entry of payload.responses) {
     if (!entry || typeof entry !== 'object') return { ok: false, error: 'Antwortbewertung ist ungültig.' };
     if (!ids.has(entry.responseId)) return { ok: false, error: `Unbekannte Antwort-ID: ${entry.responseId}` };
+    if (seen.has(entry.responseId)) return { ok: false, error: `Doppelte Antwortbewertung: ${entry.responseId}` };
     seen.add(entry.responseId);
     if (typeof entry.rationale !== 'string' || !entry.rationale.trim()) return { ok: false, error: 'Begründung fehlt.' };
     if (!Array.isArray(entry.strengths) || !Array.isArray(entry.weaknesses)) return { ok: false, error: 'Stärken oder Schwächen fehlen.' };
     if (!entry.scores || typeof entry.scores !== 'object') return { ok: false, error: 'scores fehlt.' };
+    const scoreKeys = Object.keys(entry.scores);
+    if (scoreKeys.length !== criteriaIds.length || scoreKeys.some((key) => !criteria.has(key))) return { ok: false, error: 'scores enthält unbekannte oder fehlende Kriterien.' };
     for (const criterion of criteriaIds) {
       const score = entry.scores[criterion];
       if (!Number.isInteger(score) || score < 1 || score > 10) return { ok: false, error: `Score ${criterion} muss 1-10 sein.` };

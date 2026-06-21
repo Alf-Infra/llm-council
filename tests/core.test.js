@@ -26,6 +26,28 @@ test('review JSON is extracted and strictly validated', () => {
   assert.equal(invalid.ok, false);
 });
 
+test('review validation rejects duplicate responses and extra scores', () => {
+  const ids = ['Response A', 'Response B'];
+  const criteriaIds = criteria.map((item) => item.id);
+  const duplicate = validateReviewPayload({
+    responses: [
+      { responseId: 'Response A', scores: { correctness: 8, depth: 8, usefulness: 8 }, rationale: 'ok', strengths: ['s'], weaknesses: ['w'] },
+      { responseId: 'Response A', scores: { correctness: 7, depth: 7, usefulness: 7 }, rationale: 'ok', strengths: ['s'], weaknesses: ['w'] }
+    ],
+    ranking: ids
+  }, ids, criteriaIds);
+  assert.equal(duplicate.ok, false);
+
+  const extraScore = validateReviewPayload({
+    responses: [
+      { responseId: 'Response A', scores: { correctness: 8, depth: 8, usefulness: 8, style: 10 }, rationale: 'ok', strengths: ['s'], weaknesses: ['w'] },
+      { responseId: 'Response B', scores: { correctness: 7, depth: 7, usefulness: 7 }, rationale: 'ok', strengths: ['s'], weaknesses: ['w'] }
+    ],
+    ranking: ids
+  }, ids, criteriaIds);
+  assert.equal(extraScore.ok, false);
+});
+
 test('aggregation returns transparent weighted ranking', () => {
   const ranking = aggregateReviews([
     { responses: [

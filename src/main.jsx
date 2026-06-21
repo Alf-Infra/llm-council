@@ -208,7 +208,7 @@ function RunView({ state }) {
       <div className="columns">
         <div className="panel">
           <h2>Einzelantworten</h2>
-          <div className="cards">{state.responses.map((item) => <ResponseCard item={item} key={`${item.model}-${item.anonymousId || ''}`} />)}</div>
+          <div className="cards">{state.responses.map((item) => <ResponseCard item={item} key={item.anonymousId || item.model} />)}</div>
         </div>
         <div className="panel">
           <h2>Rangliste</h2>
@@ -228,7 +228,8 @@ function RunView({ state }) {
 }
 
 function ResponseCard({ item }) {
-  return <article className="card"><header><strong>{item.anonymousId || item.model}</strong><span>{statusText[item.status] || item.status}</span></header><small>{item.model} · {item.latencyMs ?? '-'} ms · {item.usage?.total_tokens ?? item.total_tokens ?? '-'} Tokens</small><ReactMarkdown>{item.content || item.error || ''}</ReactMarkdown></article>;
+  const meta = [item.model, `${item.latencyMs ?? '-'} ms`, `${item.usage?.total_tokens ?? item.total_tokens ?? '-'} Tokens`].filter(Boolean).join(' · ');
+  return <article className="card"><header><strong>{item.anonymousId || item.model}</strong><span>{statusText[item.status] || item.status}</span></header><small>{meta}</small><ReactMarkdown>{item.content || item.error || ''}</ReactMarkdown></article>;
 }
 
 function ReviewCard({ item }) {
@@ -244,11 +245,23 @@ function deriveRunState(events) {
   const state = { stage: 'answers', responses: [], reviews: [], ranking: [], finalAnswer: '', summary: null, error: '' };
   for (const event of events) {
     if (event.stage) state.stage = event.stage;
-    if (event.response) upsert(state.responses, event.response, (x) => x.model === event.response.model);
-    if (event.responses) state.responses = event.responses;
+    if (event.type === 'model_status' && event.stage === 'answers') {
+      const item = event.response || { model: event.model, status: event.status, error: event.error };
+      upsert(state.responses, item, (x) => x.model === event.model);
+    }
+    if (event.responses) state.responses = [
+      ...event.responses,
+      ...state.responses.filter((item) => item.status === 'failed' && item.model)
+    ];
     if (event.review) upsert(state.reviews, { reviewerModel: event.model, status: event.status, review: event.review }, (x) => x.reviewerModel === event.model);
     if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'failed') upsert(state.reviews, { reviewerModel: event.model, status: 'failed', error: event.error }, (x) => x.reviewerModel === event.model);
-    if (event.ranking) state.ranking = event.ranking;
+    if (event.ranking) {
+      state.ranking = event.ranking;
+      for (const rank of event.ranking) {
+        const response = state.responses.find((item) => item.anonymousId === rank.responseId);
+        if (response) response.model = rank.model;
+      }
+    }
     if (event.finalAnswer) state.finalAnswer = event.finalAnswer;
     if (event.summary) state.summary = event.summary;
     if (event.error) state.error = event.error;

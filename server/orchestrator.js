@@ -22,8 +22,7 @@ export class CouncilOrchestrator {
       yield emit('run_started', { run: this.store.getRun(run.id) });
       yield emit('stage', { stage: 'answers' });
       const context = this.store.getContext(conversation.id, 6);
-      const answers = await this.collectAnswers(run.id, input, context, signal, emit);
-      for (const event of answers.events) yield event;
+      const answers = yield* this.collectAnswers(run.id, input, context, signal, emit);
 
       const successes = answers.results.filter((item) => item.status === 'success');
       if (successes.length < 2) {
@@ -35,12 +34,11 @@ export class CouncilOrchestrator {
 
       const anonymous = anonymizeResponses(successes, this.randomSeedFactory(run.id));
       for (const item of anonymous) this.store.setAnonymousId(run.id, item.model, item.anonymousId);
-      yield emit('answers_complete', { responses: anonymous.map(stripInternalContent) });
+      yield emit('answers_complete', { responses: anonymous.map(stripPreReviewMapping) });
 
       this.store.updateRun(run.id, { status: 'running', stage: 'reviews' });
       yield emit('stage', { stage: 'reviews' });
-      const reviews = await this.collectReviews(run.id, input, anonymous, signal, emit);
-      for (const event of reviews.events) yield event;
+      const reviews = yield* this.collectReviews(run.id, input, anonymous, signal, emit);
       const validReviews = reviews.results.filter((item) => item.status === 'success').map((item) => item.review);
       const ranking = aggregateReviews(validReviews, anonymous, input.criteria);
       this.store.saveRanking(run.id, ranking);
@@ -68,10 +66,11 @@ export class CouncilOrchestrator {
     }
   }
 
-  async collectAnswers(runId, input, context, signal, emit) {
-    const events = [];
-    const tasks = input.councilModels.map(async (model) => {
-      events.push(emit('model_status', { model, stage: 'answers', status: 'running' }));
+  async *collectAnswers(runId, input, context, signal, emit) {
+    const queue = new AsyncEventQueue();
+    const results = new Array(input.councilModels.length);
+    const tasks = input.councilModels.map(async (model, index) => {
+      queue.push(emit('model_status', { model, stage: 'answers', status: 'running' }));
       try {
         const result = await this.provider.chat({
           model,
@@ -80,44 +79,55 @@ export class CouncilOrchestrator {
         });
         const item = { model, status: 'success', content: result.content, latencyMs: result.latencyMs, usage: result.usage };
         this.store.addResponse({ runId, ...item });
-        events.push(emit('model_status', { model, stage: 'answers', status: 'success', response: publicResponse(item) }));
+        queue.push(emit('model_status', { model, stage: 'answers', status: 'success', response: publicResponse(item) }));
+        results[index] = item;
         return item;
       } catch (error) {
+        if (signal?.aborted) throw error;
         const item = { model, status: 'failed', error: safeMessage(error) };
         this.store.addResponse({ runId, ...item });
         this.store.addError(runId, `answer:${model}`, item.error);
-        events.push(emit('model_status', { model, stage: 'answers', status: 'failed', error: item.error }));
+        queue.push(emit('model_status', { model, stage: 'answers', status: 'failed', error: item.error }));
+        results[index] = item;
         return item;
       }
     });
-    const results = await Promise.all(tasks);
-    return { results, events };
+    closeQueueWhenDone(queue, tasks);
+    for await (const event of queue) yield event;
+    await throwIfRejected(tasks);
+    return { results };
   }
 
-  async collectReviews(runId, input, anonymous, signal, emit) {
-    const events = [];
+  async *collectReviews(runId, input, anonymous, signal, emit) {
+    const queue = new AsyncEventQueue();
     const anonymousIds = anonymous.map((item) => item.anonymousId);
     const criteriaIds = input.criteria.map((item) => item.id);
-    const tasks = input.councilModels.map(async (model) => {
-      events.push(emit('model_status', { model, stage: 'reviews', status: 'running' }));
+    const results = new Array(input.councilModels.length);
+    const tasks = input.councilModels.map(async (model, index) => {
+      queue.push(emit('model_status', { model, stage: 'reviews', status: 'running' }));
       const prompt = buildReviewPrompt(input.question, anonymous, input.criteria);
       try {
         const first = await this.provider.chat({ model, signal, responseFormatJson: true, messages: [{ role: 'system', content: reviewSystemPrompt(input.criteria) }, { role: 'user', content: prompt }] });
         const parsed = await this.parseOrRepairReview(model, first.content, first.usage, first.latencyMs, anonymousIds, criteriaIds, input.criteria, signal);
         const item = { reviewerModel: model, status: 'success', review: parsed.review, latencyMs: parsed.latencyMs, usage: mergeUsage(first.usage, parsed.repairUsage) };
         this.store.addReview({ runId, ...item });
-        events.push(emit('model_status', { model, stage: 'reviews', status: 'success', review: item.review }));
+        queue.push(emit('model_status', { model, stage: 'reviews', status: 'success', review: item.review }));
+        results[index] = item;
         return item;
       } catch (error) {
+        if (signal?.aborted) throw error;
         const item = { reviewerModel: model, status: 'failed', error: safeMessage(error) };
         this.store.addReview({ runId, ...item });
         this.store.addError(runId, `review:${model}`, item.error);
-        events.push(emit('model_status', { model, stage: 'reviews', status: 'failed', error: item.error }));
+        queue.push(emit('model_status', { model, stage: 'reviews', status: 'failed', error: item.error }));
+        results[index] = item;
         return item;
       }
     });
-    const results = await Promise.all(tasks);
-    return { results, events };
+    closeQueueWhenDone(queue, tasks);
+    for await (const event of queue) yield event;
+    await throwIfRejected(tasks);
+    return { results };
   }
 
   async parseOrRepairReview(model, content, usage, latencyMs, anonymousIds, criteriaIds, criteria, signal) {
@@ -204,8 +214,8 @@ function publicResponse(item) {
   return { model: item.model, status: item.status, content: item.content, latencyMs: item.latencyMs, usage: item.usage };
 }
 
-function stripInternalContent(item) {
-  return { model: item.model, anonymousId: item.anonymousId, status: item.status, content: item.content, latencyMs: item.latencyMs, usage: item.usage };
+function stripPreReviewMapping(item) {
+  return { anonymousId: item.anonymousId, status: item.status, content: item.content, latencyMs: item.latencyMs, usage: item.usage };
 }
 
 function mergeUsage(a, b) {
@@ -227,4 +237,45 @@ function redactConfig(input) {
 
 function safeMessage(error) {
   return String(error?.message || error || 'Unbekannter Fehler').replace(/Bearer\s+[A-Za-z0-9._-]+/g, 'Bearer [redacted]').slice(0, 500);
+}
+
+class AsyncEventQueue {
+  constructor() {
+    this.items = [];
+    this.waiters = [];
+    this.closed = false;
+  }
+
+  push(item) {
+    if (this.closed) return;
+    const waiter = this.waiters.shift();
+    if (waiter) waiter({ value: item, done: false });
+    else this.items.push(item);
+  }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    while (this.waiters.length) this.waiters.shift()({ done: true });
+  }
+
+  [Symbol.asyncIterator]() {
+    return {
+      next: () => {
+        if (this.items.length) return Promise.resolve({ value: this.items.shift(), done: false });
+        if (this.closed) return Promise.resolve({ done: true });
+        return new Promise((resolve) => this.waiters.push(resolve));
+      }
+    };
+  }
+}
+
+function closeQueueWhenDone(queue, tasks) {
+  Promise.allSettled(tasks).then(() => queue.close());
+}
+
+async function throwIfRejected(tasks) {
+  const settled = await Promise.allSettled(tasks);
+  const rejected = settled.find((item) => item.status === 'rejected');
+  if (rejected) throw rejected.reason;
 }
