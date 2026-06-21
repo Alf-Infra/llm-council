@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { CouncilOrchestrator } from '../server/orchestrator.js';
 import { CouncilStore, createDb } from '../server/db.js';
+import { projectConversationForBrowser } from '../server/app.js';
 
 class FakeProvider {
   constructor(map) {
@@ -142,6 +143,76 @@ test('answer progress events stream before answer promises settle', async () => 
   assert.ok(rest.find((event) => event.type === 'answers_complete'));
 });
 
+test('pre-review SSE events and active API projection do not reveal answer-to-model mapping', async () => {
+  const dbPath = path.join(os.tmpdir(), `llm-council-privacy-${Date.now()}-${Math.random()}.db`);
+  const store = new CouncilStore(createDb(dbPath));
+  const provider = new DeferredProvider();
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
+  const iterator = orchestrator.run({ question: 'Q?', councilModels: ['a', 'b'], chairmanModel: 'chair', criteria }, new AbortController().signal);
+
+  const events = [];
+  while (!events.some((event) => event.type === 'answers_complete')) {
+    const next = await iterator.next();
+    assert.equal(next.done, false);
+    events.push(next.value);
+    if (next.value.type === 'model_status' && next.value.stage === 'answers' && next.value.status === 'running') {
+      provider.resolve(next.value.model, `Antwort ${next.value.model}`);
+    }
+  }
+
+  for (const event of events) {
+    assert.equal(event.type === 'model_status' && event.stage === 'answers' && Boolean(event.response?.content), false);
+    assert.equal(containsModelContentAndAnonymousId(event), false);
+  }
+  const anonymousPayload = events.find((event) => event.type === 'answers_complete').responses;
+  assert.equal(anonymousPayload.length, 2);
+  assert.ok(anonymousPayload.every((item) => item.anonymousId && item.content));
+  assert.ok(anonymousPayload.every((item) => !item.model && !item.latencyMs && !item.usage));
+
+  const projected = projectConversationForBrowser(store.getConversation(events[0].conversationId));
+  const activeRun = projected.runs[0];
+  assert.ok(activeRun.modelStatuses.every((item) => item.model && !item.content && !item.anonymous_id));
+  assert.equal(activeRun.responses.some((item) => item.model && item.content && item.anonymous_id), false);
+  assert.ok(activeRun.responses.filter((item) => item.content).every((item) => item.anonymous_id && !item.model));
+
+  for await (const event of iterator) {
+    if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'running') {
+      provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+    }
+    if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
+  }
+});
+
+test('answers are fully revealed after peer review completes', async () => {
+  const dbPath = path.join(os.tmpdir(), `llm-council-reveal-${Date.now()}-${Math.random()}.db`);
+  const store = new CouncilStore(createDb(dbPath));
+  const provider = new DeferredProvider();
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
+  const events = [];
+
+  for await (const event of orchestrator.run({ question: 'Q?', councilModels: ['a', 'b'], chairmanModel: 'chair', criteria }, new AbortController().signal)) {
+    events.push(event);
+    if (event.type === 'model_status' && event.stage === 'answers' && event.status === 'running') {
+      provider.resolve(event.model, `Antwort ${event.model}`);
+    }
+    if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'running') {
+      provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+    }
+    if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
+  }
+
+  const reveal = events.find((event) => event.type === 'answers_revealed');
+  assert.ok(reveal);
+  assert.deepEqual(new Set(reveal.responses.map((item) => item.model)), new Set(['a', 'b']));
+  assert.deepEqual(new Set(reveal.responses.map((item) => item.anonymousId)), new Set(['Response A', 'Response B']));
+  assert.ok(reveal.responses.every((item) => item.content && item.latencyMs != null && item.usage));
+
+  const projected = projectConversationForBrowser(store.getConversation(events[0].conversationId));
+  const completedRun = projected.runs[0];
+  assert.ok(completedRun.ranking);
+  assert.ok(completedRun.responses.every((item) => item.model && item.anonymous_id && item.content));
+});
+
 test('aborted runs are persisted as aborted', async () => {
   const dbPath = path.join(os.tmpdir(), `llm-council-abort-${Date.now()}-${Math.random()}.db`);
   const store = new CouncilStore(createDb(dbPath));
@@ -199,3 +270,11 @@ test('completed runs can be reopened from the same sqlite file after restart', a
   assert.equal(conversation.runs[0].ranking.length, 2);
   assert.equal(conversation.runs[0].final_answer, 'Finale Antwort');
 });
+
+function containsModelContentAndAnonymousId(value) {
+  if (!value || typeof value !== 'object') return false;
+  if ('model' in value && 'content' in value && ('anonymousId' in value || 'anonymous_id' in value)) return true;
+  return Object.values(value).some((item) => Array.isArray(item)
+    ? item.some(containsModelContentAndAnonymousId)
+    : containsModelContentAndAnonymousId(item));
+}

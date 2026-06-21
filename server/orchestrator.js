@@ -43,6 +43,7 @@ export class CouncilOrchestrator {
       const ranking = aggregateReviews(validReviews, anonymous, input.criteria);
       this.store.saveRanking(run.id, ranking);
       yield emit('ranking', { ranking });
+      yield emit('answers_revealed', { responses: answers.results.map((item) => revealResponse(item, anonymous)) });
 
       this.store.updateRun(run.id, { status: 'running', stage: 'synthesis' });
       yield emit('stage', { stage: 'synthesis' });
@@ -79,7 +80,7 @@ export class CouncilOrchestrator {
         });
         const item = { model, status: 'success', content: result.content, latencyMs: result.latencyMs, usage: result.usage };
         this.store.addResponse({ runId, ...item });
-        queue.push(emit('model_status', { model, stage: 'answers', status: 'success', response: publicResponse(item) }));
+        queue.push(emit('model_status', { model, stage: 'answers', status: 'success', response: publicResponseStatus(item) }));
         results[index] = item;
         return item;
       } catch (error) {
@@ -210,12 +211,25 @@ function summarizeRun(started, answerResults, reviewResults, chairman) {
   };
 }
 
-function publicResponse(item) {
-  return { model: item.model, status: item.status, content: item.content, latencyMs: item.latencyMs, usage: item.usage };
+function publicResponseStatus(item) {
+  return { model: item.model, status: item.status, latencyMs: item.latencyMs, usage: item.usage };
 }
 
 function stripPreReviewMapping(item) {
-  return { anonymousId: item.anonymousId, status: item.status, content: item.content, latencyMs: item.latencyMs, usage: item.usage };
+  return { anonymousId: item.anonymousId, content: item.content };
+}
+
+function revealResponse(item, anonymous) {
+  const mapped = anonymous.find((response) => response.model === item.model);
+  return {
+    model: item.model,
+    anonymousId: mapped?.anonymousId || null,
+    status: item.status,
+    content: item.content,
+    error: item.error,
+    latencyMs: item.latencyMs,
+    usage: item.usage
+  };
 }
 
 function mergeUsage(a, b) {

@@ -26,7 +26,7 @@ export function createApp(options = {}) {
   app.get('/api/conversations/:id', (req, res) => {
     const conversation = store.getConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'Conversation nicht gefunden.' });
-    return res.json({ conversation });
+    return res.json({ conversation: projectConversationForBrowser(conversation) });
   });
 
   app.post('/api/runs', async (req, res) => {
@@ -91,6 +91,47 @@ export function createApp(options = {}) {
   app.use(express.static(clientDir));
   app.get('*', (_req, res) => res.sendFile(path.join(clientDir, 'index.html')));
   return app;
+}
+
+export function projectConversationForBrowser(conversation) {
+  return {
+    ...conversation,
+    runs: (conversation.runs || []).map(projectRunForBrowser)
+  };
+}
+
+function projectRunForBrowser(run) {
+  const reveal = Array.isArray(run.ranking) && run.ranking.length > 0;
+  if (reveal) return run;
+  const responses = run.responses || [];
+  return {
+    ...run,
+    modelStatuses: responses.map((item) => ({
+      model: item.model,
+      status: item.status,
+      error: item.status === 'failed' ? item.error : undefined,
+      latency_ms: item.latency_ms,
+      prompt_tokens: item.prompt_tokens,
+      completion_tokens: item.completion_tokens,
+      total_tokens: item.total_tokens
+    })),
+    responses: responses
+      .map((item) => {
+        if (item.status === 'success' && item.anonymous_id) {
+          return { anonymous_id: item.anonymous_id, status: 'success', content: item.content };
+        }
+        return {
+          model: item.model,
+          status: item.status,
+          error: item.error,
+          latency_ms: item.latency_ms,
+          prompt_tokens: item.prompt_tokens,
+          completion_tokens: item.completion_tokens,
+          total_tokens: item.total_tokens
+        };
+      })
+      .filter((item) => item.status !== 'success' || item.content || item.model)
+  };
 }
 
 function writeSse(res, event) {

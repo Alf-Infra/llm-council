@@ -249,17 +249,20 @@ function deriveRunState(events) {
       const item = event.response || { model: event.model, status: event.status, error: event.error };
       upsert(state.responses, item, (x) => x.model === event.model);
     }
-    if (event.responses) state.responses = [
-      ...event.responses,
+    if (event.type === 'answers_complete' && event.responses) state.responses = [
+      ...event.responses.map((item) => ({ status: 'success', ...item })),
       ...state.responses.filter((item) => item.status === 'failed' && item.model)
     ];
     if (event.review) upsert(state.reviews, { reviewerModel: event.model, status: event.status, review: event.review }, (x) => x.reviewerModel === event.model);
     if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'failed') upsert(state.reviews, { reviewerModel: event.model, status: 'failed', error: event.error }, (x) => x.reviewerModel === event.model);
     if (event.ranking) {
       state.ranking = event.ranking;
-      for (const rank of event.ranking) {
-        const response = state.responses.find((item) => item.anonymousId === rank.responseId);
-        if (response) response.model = rank.model;
+    }
+    if (event.type === 'answers_revealed' && event.responses) {
+      for (const response of event.responses) {
+        const existing = state.responses.find((item) => item.anonymousId === response.anonymousId || item.model === response.model);
+        if (existing) Object.assign(existing, response);
+        else state.responses.push(response);
       }
     }
     if (event.finalAnswer) state.finalAnswer = event.finalAnswer;
@@ -270,9 +273,14 @@ function deriveRunState(events) {
 }
 
 function historyToEvents(run) {
-  const events = [{ type: 'stage', stage: run.stage }, { type: 'answers_complete', responses: (run.responses || []).map((r) => ({ model: r.model, anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } })) }];
+  const events = [{ type: 'stage', stage: run.stage }];
+  if (run.modelStatuses) {
+    events.push(...run.modelStatuses.map((r) => ({ type: 'model_status', stage: 'answers', model: r.model, status: r.status, response: { model: r.model, status: r.status, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } }, error: r.error })));
+  }
+  events.push({ type: 'answers_complete', responses: (run.responses || []).map((r) => ({ anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens }, model: r.model })) });
   if (run.reviews) events.push(...run.reviews.map((r) => ({ type: 'model_status', stage: 'reviews', model: r.reviewer_model, status: r.status, review: r.review, error: r.error })));
   if (run.ranking) events.push({ type: 'ranking', ranking: run.ranking });
+  if (run.ranking) events.push({ type: 'answers_revealed', responses: (run.responses || []).map((r) => ({ model: r.model, anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } })) });
   if (run.final_answer) events.push({ type: 'final', finalAnswer: run.final_answer, summary: run.summary });
   if (run.chairman_error) events.push({ type: 'chairman_failed', error: run.chairman_error, summary: run.summary });
   return events;
