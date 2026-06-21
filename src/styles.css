@@ -1,0 +1,73 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f5f7f8;
+  color: #1e2528;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input, textarea { font: inherit; }
+button, .linkButton {
+  border: 1px solid #c9d1d6;
+  background: #fff;
+  color: #1e2528;
+  min-height: 36px;
+  border-radius: 6px;
+  padding: 0 12px;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: not-allowed; }
+.primary { background: #1c6b5a; color: #fff; border-color: #1c6b5a; }
+.shell { min-height: 100vh; display: grid; grid-template-columns: 280px 1fr; }
+.sidebar { background: #192124; color: #fff; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.brand { font-size: 22px; font-weight: 750; }
+.new { background: #294044; color: #fff; border-color: #456066; }
+.history { display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+.historyItem { color: #fff; background: transparent; border-color: #35474c; align-items: flex-start; flex-direction: column; height: auto; padding: 10px; text-align: left; }
+.historyItem.active { background: #26373b; }
+.historyItem span { max-width: 100%; overflow-wrap: anywhere; }
+small, .muted { color: #67737a; }
+.historyItem small { color: #b5c3c7; }
+.workspace { padding: 22px; display: flex; flex-direction: column; gap: 18px; }
+.composer { display: flex; flex-direction: column; gap: 10px; }
+textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px solid #c9d1d6; border-radius: 6px; padding: 12px; background: #fff; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.error { background: #fff0ef; color: #9c2b20; border: 1px solid #efc0ba; padding: 10px 12px; border-radius: 6px; }
+.configGrid, .columns { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .8fr); gap: 16px; }
+.panel { background: #fff; border: 1px solid #d9e0e3; border-radius: 8px; padding: 14px; }
+.panelHeader { display: flex; justify-content: space-between; align-items: center; }
+h2 { margin: 0 0 12px; font-size: 16px; }
+.icon { width: 36px; padding: 0; }
+.modelList { display: flex; flex-direction: column; gap: 8px; }
+.modelRow { display: grid; grid-template-columns: minmax(120px, 1fr) auto auto 36px; gap: 8px; align-items: center; }
+.modelRow input[type="text"], .modelRow input:not([type]) { width: 100%; border: 1px solid #c9d1d6; border-radius: 6px; padding: 8px; }
+.criterion { display: grid; grid-template-columns: 150px 1fr 32px; gap: 10px; align-items: center; margin-bottom: 10px; }
+.phaseStrip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.phase { border: 1px solid #d3dadf; background: #eef2f3; border-radius: 6px; padding: 10px; font-weight: 650; text-align: center; }
+.phase.active { background: #dbece7; border-color: #9ac7bc; color: #174f43; }
+.run { display: flex; flex-direction: column; gap: 16px; }
+.summary { display: flex; gap: 8px; flex-wrap: wrap; }
+.summary span { background: #e9eef0; border-radius: 999px; padding: 6px 10px; }
+.cards, .reviewGrid { display: grid; gap: 12px; }
+.card { border: 1px solid #e0e5e8; border-radius: 8px; padding: 12px; background: #fbfcfc; overflow: hidden; }
+.card header { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.card pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f2f5f6; padding: 10px; border-radius: 6px; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; }
+td { padding: 8px; border-bottom: 1px solid #e5eaed; vertical-align: top; }
+td small { display: block; margin-top: 3px; overflow-wrap: anywhere; }
+.final { min-height: 140px; }
+.boot { min-height: 100vh; display: grid; place-items: center; font-size: 24px; font-weight: 750; }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { min-height: auto; }
+  .configGrid, .columns { grid-template-columns: 1fr; }
+  .modelRow { grid-template-columns: 1fr; }
+  .criterion { grid-template-columns: 1fr; }
+}

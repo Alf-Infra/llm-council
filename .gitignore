@@ -1,0 +1,14 @@
+node_modules/
+dist/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+.env
+.DS_Store
+.app-state.json
+.codex-build.json
+.test-result.json
+.review-result.json
+.deploy-result.json
