@@ -126,3 +126,163 @@ Referenz: https://github.com/karpathy/llm-council
 - Tester-Gate bestanden.
 - Reviewer-Gate grün.
 - GitHub-Push, PM2-Deploy und abschließender Healthcheck erfolgreich.
+
+## Iteration v1 Retry-Kontext — Reviewer Blocker
+
+Der erste Build-/Testlauf war technisch grün, aber das Reviewer-Gate blieb rot.
+Bitte die folgenden Punkte gezielt beheben:
+
+- Streaming-Fortschritt muss wirklich live in der UI ankommen. Der Reviewer meldet, dass `collectAnswers`/`collectReviews` Events aktuell bis nach `Promise.all` puffern und erst dann ausliefern. Stage- und Modellstatus müssen während der laufenden Calls sichtbar werden.
+- Die Anonymisierung darf vor Abschluss von Stage 2 nicht an den Browser geleakt werden. `answers_complete` darf nicht gleichzeitig `model` und `anonymousId` preisgeben, und die UI darf Modellnamen nicht schon neben `Response A/B` anzeigen.
+- Fehlgeschlagene oder getimte Stage-1-Modelle müssen in der laufenden UI sichtbar sein. Der Reviewer meldet, dass `deriveRunState` `answer-model_status` ohne `response` nicht korrekt verarbeitet und `answers_complete` nur erfolgreiche Antworten enthält.
+- Review-Validierung strikter machen: keine doppelten `responseId`-Einträge, keine zusätzlichen Bewertungen, keine stillschweigend akzeptierten fehlerhaften Reviews.
+- Tests erweitern: besonders SSE-Fortschrittsverhalten, Abbruch/Persistenz eines laufenden Runs, Chairman-Ausfall und Wiederöffnung nach Neustart.
+
+## Iteration v1 Reparaturlauf 3 — von Kevin ausdrücklich freigegeben
+
+Der zweite Tester-Lauf hat einen einzelnen reproduzierbaren Laufzeitblocker
+gefunden. Behebe diesen gezielt und vermeide darüber hinaus unnötige Umbauten:
+
+- `POST /api/runs` startet korrekt als SSE-Stream und liefert zunächst
+  `run_started`, `stage` und `model_status`, endet danach aber sofort mit
+  `aborted`.
+- Ursache laut Live-Smoke-Test: `server/app.js` verwendet `req.on('close')`
+  als Signal für einen getrennten SSE-Client. Bei einem POST feuert dieses
+  Event jedoch bereits beim normalen Abschluss des eingelesenen Request-Bodys,
+  obwohl die Response-Verbindung weiterhin offen ist.
+- Der Council-Run darf nur abgebrochen werden, wenn die ausgehende
+  SSE-Verbindung tatsächlich geschlossen beziehungsweise der Client wirklich
+  getrennt wurde. Verwende dafür ein semantisch korrektes Response-/Socket-
+  Signal und unterscheide normales Request-Ende von echtem Disconnect.
+- Ein regulär verbundener Client muss den Council-Run bis zu einem fachlichen
+  Terminalevent (`run_complete` oder bei Providerfehlern `run_failed`)
+  verfolgen können.
+- Ein tatsächlich getrennter Client muss weiterhin den AbortController
+  auslösen und den Run persistent als `aborted` markieren.
+- Ergänze Regressionstests für beide Fälle:
+  1. normal beendeter POST-Requestbody bei weiterhin offenem SSE-Response
+     bricht den Run nicht ab;
+  2. echter Client-Disconnect bricht den Run kontrolliert ab.
+- Bestehende 13 Tests, Produktions-Build, `/health`, `/`, `/api/config`,
+  Eingabevalidierung und die Reviewer-Fixes dürfen nicht regressieren.
+
+Tester-Artefakt: `.test-result.json` vom 2026-06-21T19:13:20Z.
+
+## Iteration v1 Reparaturlauf 4 — Anonymisierung vor Stage 2
+
+Kevin hat eine vierte, gezielte Nachbesserung ausdrücklich freigegeben. Das
+Reviewer-Gate vom 2026-06-21T20:35:00Z enthält noch genau einen Blocker:
+
+- Der Browser kann aktuell erfolgreiche `answer-model_status`-Events, die
+  Modellname und vollständigen Antwortinhalt enthalten, mit dem späteren
+  `answers_complete`-Payload korrelieren. Dadurch lässt sich `Response A/B`
+  bereits vor Abschluss des anonymisierten Peer-Reviews dem Ursprungsmodell
+  zuordnen.
+
+Behebe ausschließlich dieses Informationsleck und erhalte alle bisherigen
+Fixes:
+
+- Vor Abschluss von Stage 2 darf kein an den Browser gesendetes Event und kein
+  während des aktiven Runs abrufbares API-Payload gleichzeitig oder durch
+  triviale Korrelation Ursprungsmodell, Antwortinhalt und `anonymousId`
+  offenlegen.
+- Laufende Modellstatus dürfen Modellname, Status, Laufzeit und Fehlerstatus
+  anzeigen, aber bei erfolgreichen Stage-1-Calls vor Stage-2-Abschluss nicht
+  den vollständigen Antworttext enthalten.
+- Das Pre-Review-Payload mit den zu bewertenden Antworten darf nur zufällig
+  angeordnete anonyme IDs und Inhalte enthalten. Es darf weder Modellnamen noch
+  ursprüngliche Array-Indizes oder andere stabile Korrelationsschlüssel
+  enthalten.
+- Die Zuordnung `anonymousId -> model` bleibt bis zum Abschluss von Stage 2
+  ausschließlich serverseitig.
+- Nach abgeschlossenem Peer-Review darf ein explizites Reveal-Event die
+  Zuordnung und die Stage-1-Modellantworten für die transparente UI freigeben.
+- Fehlgeschlagene und getimte Stage-1-Modelle bleiben als Modellstatus sichtbar,
+  da sie keinen erfolgreichen Antwortinhalt zuordnen.
+- Prüfe auch Projektionen bereits persistierter aktiver Runs: Ein Browser darf
+  die Zuordnung nicht durch sofortiges erneutes Laden oder einen parallelen
+  Detail-GET vorzeitig erhalten.
+- Ergänze einen Regressionstest, der alle vor dem Stage-2-Abschluss sichtbaren
+  SSE-Events und aktiven API-Responses betrachtet und nachweist, dass sich
+  keine anonyme Antwort einem Ursprungsmodell zuordnen lässt.
+- Ergänze einen zweiten Test, der sicherstellt, dass die Zuordnung nach Stage 2
+  vollständig und korrekt für die UI aufgelöst wird.
+- Die 15 bestehenden Tests, der SSE-Disconnect-Fix, Live-Fortschritt,
+  Review-Validierung, Persistenz, Build und Healthchecks dürfen nicht
+  regressieren.
+
+Reviewer-Artefakt: `.review-result.json` vom 2026-06-21T20:35:00Z.
+
+## Iteration v1 Reparaturlauf 5 — Export-Sperre und atomisches Reveal
+
+Kevin hat am 2026-06-22 eine fünfte, eng begrenzte Nachbesserung ausdrücklich
+freigegeben. Behebe ausschließlich die zwei Blocker aus dem Reviewer-Artefakt
+vom 2026-06-21T20:42:38Z und erhalte alle bisherigen Fixes:
+
+1. Der Markdown-Export darf die Stage-2-Anonymisierung nicht umgehen.
+   `GET /api/runs/:id/export.md` muss während eines aktiven oder noch nicht
+   vollständig enthüllten Runs dieselbe Geheimhaltungsgrenze wie die
+   Browser-Projektion respektieren. Vor dem explizit abgeschlossenen Reveal
+   dürfen Modellname, `anonymousId` und Antwortinhalt weder gemeinsam noch
+   durch triviale Korrelation exportiert werden. Ein vollständiger Export mit
+   Modellzuordnung ist erst nach abgeschlossenem Peer-Review und atomarem
+   Reveal zulässig. Wähle für frühere Aufrufe eine klare, getestete Semantik
+   (zum Beispiel HTTP 409/423 oder einen sicher redigierten Export).
+
+2. Ranking-Persistenz, Reveal-Freigabe, Stage-Wechsel und Browser-Projektion
+   müssen atomar beziehungsweise durch einen einzigen persistierten
+   Reveal-Zustand konsistent werden. Das bloße Vorhandensein einer Rangliste
+   darf nicht als Reveal-Signal gelten. Zwischen `saveRanking`, Ranking-SSE,
+   `answers_revealed` und dem Wechsel zu `synthesis` darf ein paralleler
+   Detail-GET niemals die Zuordnung `responseId`/`anonymousId -> model`
+   erhalten. Erst nachdem der serverseitige Reveal-Zustand vollständig und
+   dauerhaft committed ist, darf die Zuordnung über SSE, Detail-API und Export
+   sichtbar werden.
+
+Ergänze gezielte Regressionstests:
+
+- Ein Export-Aufruf während `stage=reviews` leakt keine Zuordnung, Modellnamen
+  oder gemeinsam korrelierbaren Antwortdaten.
+- Ein kontrolliert pausierter Ablauf zwischen Ranking-Berechnung/-Persistenz
+  und Reveal prüft per parallelem Detail-GET und Export, dass die Zuordnung
+  weiterhin verborgen bleibt.
+- Nach atomarem Reveal liefern SSE, Detail-GET und Markdown-Export dieselbe
+  vollständige und korrekte Zuordnung.
+- Die bestehenden 17 Tests, der SSE-Disconnect-Fix, Live-Fortschritt,
+  Review-Validierung, Persistenz, Build und Healthchecks dürfen nicht
+  regressieren.
+
+Reviewer-Artefakt: `.review-result.json` vom 2026-06-21T20:42:38Z.
+
+## Iteration v1 Reparaturlauf 6 — Reveal-Timing
+
+Kevin hat am 2026-06-22 Option a und damit einen sechsten, ausschließlich auf
+den letzten Reviewer-Blocker begrenzten Reparaturlauf freigegeben.
+
+Der Export ist vor dem Reveal inzwischen korrekt gesperrt. Offen ist nur noch
+die zeitliche Konsistenz des Reveals:
+
+- `server/orchestrator.js` setzt `revealed_at` derzeit vor dem `ranking`-Yield.
+  Das Ranking enthält bereits die Zuordnung `responseId`/`anonymousId -> model`.
+- Nach diesem Yield kann der Async-Generator beliebig lange pausieren, bevor
+  `answers_revealed` gesendet wird. In diesem Zwischenzustand geben Ranking-SSE,
+  Detail-GET und Export die Modellzuordnung bereits frei, obwohl der
+  persistierte Run weiterhin `stage=reviews` ist.
+- Das explizite Reveal muss aus Browser-Sicht konsistent sein. Vor dem
+  `answers_revealed`-Übergang dürfen weder Ranking-SSE noch Detail-GET noch
+  Export eine Modellzuordnung enthalten. Das Ranking darf vor dem Reveal
+  weiterhin anonymisierte Scores/Ränge zeigen, muss Modellfelder aber
+  redigieren.
+- `revealed_at`, die freigegebene Ranking-Projektion, `answers_revealed` und der
+  anschließende Stage-Wechsel müssen so geordnet beziehungsweise persistiert
+  werden, dass kein von API/SSE beobachtbarer Zwischenzustand die Zuordnung
+  vorzeitig offenlegt.
+- Ergänze einen Regressionstest, der den Async-Generator gezielt direkt nach
+  dem Ranking-Yield und vor `answers_revealed` pausiert. In genau diesem Zustand
+  müssen Ranking-Event, paralleler Detail-GET und Export anonymisiert bzw.
+  gesperrt bleiben.
+- Nach dem tatsächlichen Reveal müssen SSE, Detail-GET und Export weiterhin
+  dieselbe vollständige Modellzuordnung liefern.
+- Die bestehenden 20 Tests und alle bisherigen Fixes dürfen nicht regressieren.
+
+Reviewer-Artefakt: `.review-result.json` vom 2026-06-22T08:00:06+02:00`.
