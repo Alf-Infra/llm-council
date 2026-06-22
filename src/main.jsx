@@ -280,7 +280,7 @@ function historyToEvents(run) {
   events.push({ type: 'answers_complete', responses: (run.responses || []).map((r) => ({ anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens }, model: r.model })) });
   if (run.reviews) events.push(...run.reviews.map((r) => ({ type: 'model_status', stage: 'reviews', model: r.reviewer_model, status: r.status, review: r.review, error: r.error })));
   if (run.ranking) events.push({ type: 'ranking', ranking: run.ranking });
-  if (run.ranking) events.push({ type: 'answers_revealed', responses: (run.responses || []).map((r) => ({ model: r.model, anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } })) });
+  if (run.revealed_at) events.push({ type: 'answers_revealed', responses: (run.responses || []).map((r) => ({ model: r.model, anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } })) });
   if (run.final_answer) events.push({ type: 'final', finalAnswer: run.final_answer, summary: run.summary });
   if (run.chairman_error) events.push({ type: 'chairman_failed', error: run.chairman_error, summary: run.summary });
   return events;

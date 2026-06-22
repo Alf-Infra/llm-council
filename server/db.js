@@ -31,6 +31,7 @@ export function createDb(dbPath = path.join(process.cwd(), 'data', 'llm-council.
       summary_json TEXT,
       final_answer TEXT,
       chairman_error TEXT,
+      revealed_at TEXT,
       started_at TEXT NOT NULL,
       completed_at TEXT,
       updated_at TEXT NOT NULL
@@ -75,6 +76,7 @@ export function createDb(dbPath = path.join(process.cwd(), 'data', 'llm-council.
       created_at TEXT NOT NULL
     );
   `);
+  migrate(db);
   return db;
 }
 
@@ -121,6 +123,12 @@ export class CouncilStore {
     this.db.prepare(`UPDATE runs SET status = ?, stage = ?, summary_json = ?, final_answer = ?, chairman_error = ?, completed_at = ?, updated_at = ? WHERE id = ?`)
       .run(merged.status, merged.stage, stringifyOrNull(merged.summary), merged.final_answer ?? null, merged.chairman_error ?? null, merged.completed_at ?? null, merged.updated_at, idValue);
     return this.getRun(idValue);
+  }
+
+  markRunRevealed(runId) {
+    const revealedAt = now();
+    this.db.prepare('UPDATE runs SET revealed_at = ?, updated_at = ? WHERE id = ?').run(revealedAt, revealedAt, runId);
+    return this.getRun(runId);
   }
 
   addResponse(response) {
@@ -193,6 +201,11 @@ export class CouncilStore {
 
 function normalizeRun(row) {
   return { ...row, config: parseJson(row.config_json), summary: parseJson(row.summary_json) };
+}
+
+function migrate(db) {
+  const columns = db.prepare('PRAGMA table_info(runs)').all().map((row) => row.name);
+  if (!columns.includes('revealed_at')) db.exec('ALTER TABLE runs ADD COLUMN revealed_at TEXT');
 }
 
 function parseJson(value) {

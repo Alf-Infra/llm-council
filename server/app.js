@@ -77,6 +77,7 @@ export function createApp(options = {}) {
   app.get('/api/runs/:id/export.md', (req, res) => {
     const run = store.getRun(req.params.id);
     if (!run) return res.status(404).send('Run nicht gefunden.');
+    if (!run.revealed_at) return res.status(409).send('Export ist erst nach abgeschlossenem Peer-Review und Reveal verfuegbar.');
     const conversation = store.getConversation(run.conversation_id);
     const responses = store.getResponses(run.id);
     const reviews = store.getReviews(run.id);
@@ -101,11 +102,12 @@ export function projectConversationForBrowser(conversation) {
 }
 
 function projectRunForBrowser(run) {
-  const reveal = Array.isArray(run.ranking) && run.ranking.length > 0;
+  const reveal = Boolean(run.revealed_at);
   if (reveal) return run;
   const responses = run.responses || [];
   return {
     ...run,
+    ranking: Array.isArray(run.ranking) ? run.ranking.map(redactRankingModel) : run.ranking,
     modelStatuses: responses.map((item) => ({
       model: item.model,
       status: item.status,
@@ -132,6 +134,11 @@ function projectRunForBrowser(run) {
       })
       .filter((item) => item.status !== 'success' || item.content || item.model)
   };
+}
+
+function redactRankingModel(item) {
+  const { model: _model, ...safe } = item;
+  return safe;
 }
 
 function writeSse(res, event) {

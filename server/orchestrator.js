@@ -4,10 +4,11 @@ import { buildReviewRepairPrompt, extractJsonObject, validateReviewPayload } fro
 import { now } from './db.js';
 
 export class CouncilOrchestrator {
-  constructor({ provider, store, randomSeedFactory = (runId) => runId }) {
+  constructor({ provider, store, randomSeedFactory = (runId) => runId, hooks = {} }) {
     this.provider = provider;
     this.store = store;
     this.randomSeedFactory = randomSeedFactory;
+    this.hooks = hooks;
   }
 
   async *run(input, signal) {
@@ -42,6 +43,8 @@ export class CouncilOrchestrator {
       const validReviews = reviews.results.filter((item) => item.status === 'success').map((item) => item.review);
       const ranking = aggregateReviews(validReviews, anonymous, input.criteria);
       this.store.saveRanking(run.id, ranking);
+      await this.hooks.afterRankingSaved?.({ runId: run.id, conversationId: conversation.id });
+      this.store.markRunRevealed(run.id);
       yield emit('ranking', { ranking });
       yield emit('answers_revealed', { responses: answers.results.map((item) => revealResponse(item, anonymous)) });
 

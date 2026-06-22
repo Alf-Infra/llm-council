@@ -9,6 +9,12 @@ import { loadRuntimeConfig } from '../server/config.js';
 import { CouncilStore, createDb } from '../server/db.js';
 import { CouncilOrchestrator } from '../server/orchestrator.js';
 
+const criteria = [
+  { id: 'correctness', label: 'Korrektheit', weight: 1 },
+  { id: 'depth', label: 'Tiefe', weight: 1 },
+  { id: 'usefulness', label: 'Praxisnutzen', weight: 1 }
+];
+
 test('health and safe config endpoints work without model calls', async () => {
   const app = createApp({
     dbPath: path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`),
@@ -92,6 +98,120 @@ test('real SSE client disconnect aborts and persists a running council run', asy
   }
 });
 
+test('export during reviews is blocked and does not leak anonymized mapping', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`)));
+  const provider = new DeferredProvider();
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
+  const app = createApp({ config: loadRuntimeConfig(), store, provider, orchestrator });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const iterator = orchestrator.run({ question: 'Q?', councilModels: ['a', 'b'], chairmanModel: 'chair', criteria }, new AbortController().signal);
+  let runId;
+  let conversationId;
+
+  try {
+    while (true) {
+      const next = await iterator.next();
+      assert.equal(next.done, false);
+      const event = next.value;
+      runId ||= event.runId;
+      conversationId ||= event.conversationId;
+      if (event.type === 'model_status' && event.stage === 'answers' && event.status === 'running') provider.resolve(event.model, `Antwort ${event.model}`);
+      if (event.type === 'stage' && event.stage === 'reviews') break;
+    }
+
+    const exportResponse = await fetch(`${base}/api/runs/${runId}/export.md`);
+    const exportBody = await exportResponse.text();
+    assert.equal(exportResponse.status, 409);
+    assert.equal(exportBody.includes('Antwort a'), false);
+    assert.equal(exportBody.includes('Antwort b'), false);
+    assert.equal(exportBody.includes('Response A'), false);
+
+    const detail = await fetch(`${base}/api/conversations/${conversationId}`).then((r) => r.json());
+    const activeRun = detail.conversation.runs[0];
+    assert.equal(activeRun.revealed_at, null);
+    assert.equal(activeRun.responses.some((item) => item.model && item.content && item.anonymous_id), false);
+  } finally {
+    for (const pending of [...provider.pending]) provider.reject(pending.model, new Error('stop'));
+    await iterator.return?.();
+    server.close();
+  }
+});
+
+test('detail API and export stay hidden between ranking persistence and reveal', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`)));
+  const provider = new DeferredProvider();
+  let pause;
+  const paused = new Promise((resolve) => {
+    pause = createPause(resolve);
+  });
+  const orchestrator = new CouncilOrchestrator({
+    provider,
+    store,
+    randomSeedFactory: () => 'fixed',
+    hooks: { afterRankingSaved: pause.wait }
+  });
+  const app = createApp({ config: loadRuntimeConfig(), store, provider, orchestrator });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const events = [];
+
+  try {
+    const runPromise = consumeRun(orchestrator, provider, events);
+    const pausedRun = await paused;
+    const hiddenDetail = await fetch(`${base}/api/conversations/${pausedRun.conversationId}`).then((r) => r.json());
+    const hiddenRun = hiddenDetail.conversation.runs[0];
+    assert.equal(hiddenRun.revealed_at, null);
+    assert.ok(hiddenRun.ranking.every((item) => !item.model));
+    assert.equal(hiddenRun.responses.some((item) => item.model && item.content && item.anonymous_id), false);
+
+    const exportResponse = await fetch(`${base}/api/runs/${pausedRun.runId}/export.md`);
+    assert.equal(exportResponse.status, 409);
+
+    pause.release();
+    await runPromise;
+  } finally {
+    server.close();
+  }
+});
+
+test('after reveal SSE, detail API and markdown export expose the same mapping', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`)));
+  const provider = new DeferredProvider();
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
+  const app = createApp({ config: loadRuntimeConfig(), store, provider, orchestrator });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const events = [];
+
+  try {
+    await consumeRun(orchestrator, provider, events);
+    const reveal = events.find((event) => event.type === 'answers_revealed');
+    assert.ok(reveal);
+    const expected = reveal.responses.filter((item) => item.status === 'success').map((item) => [item.anonymousId, item.model, item.content]);
+
+    const detail = await fetch(`${base}/api/conversations/${reveal.conversationId}`).then((r) => r.json());
+    const run = detail.conversation.runs[0];
+    assert.ok(run.revealed_at);
+    for (const [anonymousId, model, content] of expected) {
+      assert.ok(run.responses.some((item) => item.anonymous_id === anonymousId && item.model === model && item.content === content));
+    }
+
+    const exportResponse = await fetch(`${base}/api/runs/${reveal.runId}/export.md`);
+    const markdown = await exportResponse.text();
+    assert.equal(exportResponse.status, 200);
+    for (const [anonymousId, model, content] of expected) {
+      assert.ok(markdown.includes(`### ${anonymousId} / ${model}`));
+      assert.ok(markdown.includes(content));
+    }
+  } finally {
+    server.close();
+  }
+});
+
 function validRunRequest() {
   return {
     question: 'Was ist robuste Fehlerbehandlung?',
@@ -103,6 +223,19 @@ function validRunRequest() {
       { id: 'usefulness', weight: 1 }
     ]
   };
+}
+
+function reviewJson(ids) {
+  return JSON.stringify({
+    responses: ids.map((id, index) => ({
+      responseId: id,
+      scores: { correctness: 9 - index, depth: 8 - index, usefulness: 7 - index },
+      rationale: 'begruendung',
+      strengths: ['staerke'],
+      weaknesses: ['schwaeche']
+    })),
+    ranking: ids
+  });
 }
 
 function parseSse(text) {
@@ -156,4 +289,68 @@ async function waitForRunStatus(store, runId, status) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class DeferredProvider {
+  constructor() {
+    this.pending = [];
+    this.ready = new Map();
+  }
+
+  async chat({ model, signal }) {
+    if (signal?.aborted) throw signal.reason || new Error('aborted');
+    if (this.ready.has(model)) {
+      const content = this.ready.get(model).shift();
+      if (!this.ready.get(model).length) this.ready.delete(model);
+      return { content, usage: { total_tokens: 1 }, latencyMs: 1 };
+    }
+    return await new Promise((resolve, reject) => {
+      const pending = { model, resolve, reject };
+      this.pending.push(pending);
+      signal?.addEventListener('abort', () => reject(signal.reason || new Error('aborted')), { once: true });
+    });
+  }
+
+  resolve(model, content) {
+    const index = this.pending.findIndex((pending) => pending.model === model);
+    if (index === -1) {
+      const queued = this.ready.get(model) || [];
+      queued.push(content);
+      this.ready.set(model, queued);
+      return;
+    }
+    const [item] = this.pending.splice(index, 1);
+    item.resolve({ content, usage: { total_tokens: 1 }, latencyMs: 1 });
+  }
+
+  reject(model, error) {
+    const index = this.pending.findIndex((pending) => pending.model === model);
+    if (index === -1) return;
+    const [item] = this.pending.splice(index, 1);
+    item.reject(error);
+  }
+}
+
+async function consumeRun(orchestrator, provider, events) {
+  for await (const event of orchestrator.run({ question: 'Q?', councilModels: ['a', 'b'], chairmanModel: 'chair', criteria }, new AbortController().signal)) {
+    events.push(event);
+    if (event.type === 'model_status' && event.stage === 'answers' && event.status === 'running') provider.resolve(event.model, `Antwort ${event.model}`);
+    if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'running') provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+    if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
+  }
+}
+
+function createPause(onPaused) {
+  let release;
+  return {
+    wait(context) {
+      onPaused(context);
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+    release() {
+      release?.();
+    }
+  };
 }
