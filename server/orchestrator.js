@@ -44,8 +44,8 @@ export class CouncilOrchestrator {
       const ranking = aggregateReviews(validReviews, anonymous, input.criteria);
       this.store.saveRanking(run.id, ranking);
       await this.hooks.afterRankingSaved?.({ runId: run.id, conversationId: conversation.id });
+      yield emit('ranking', { ranking: ranking.map(redactRankingModel) });
       this.store.markRunRevealed(run.id);
-      yield emit('ranking', { ranking });
       yield emit('answers_revealed', { responses: answers.results.map((item) => revealResponse(item, anonymous)) });
 
       this.store.updateRun(run.id, { status: 'running', stage: 'synthesis' });
@@ -233,6 +233,11 @@ function revealResponse(item, anonymous) {
     latencyMs: item.latencyMs,
     usage: item.usage
   };
+}
+
+function redactRankingModel(item) {
+  const { model: _model, ...safe } = item;
+  return safe;
 }
 
 function mergeUsage(a, b) {

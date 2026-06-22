@@ -177,6 +177,66 @@ test('detail API and export stay hidden between ranking persistence and reveal',
   }
 });
 
+test('ranking SSE stays anonymous until answers_revealed commits the reveal', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`)));
+  const provider = new DeferredProvider();
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
+  const app = createApp({ config: loadRuntimeConfig(), store, provider, orchestrator });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const iterator = orchestrator.run({ question: 'Q?', councilModels: ['a', 'b'], chairmanModel: 'chair', criteria }, new AbortController().signal);
+  let rankingEvent;
+
+  try {
+    while (!rankingEvent) {
+      const next = await iterator.next();
+      assert.equal(next.done, false);
+      const event = next.value;
+      if (event.type === 'model_status' && event.stage === 'answers' && event.status === 'running') provider.resolve(event.model, `Antwort ${event.model}`);
+      if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'running') provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+      if (event.type === 'ranking') rankingEvent = event;
+    }
+
+    assert.ok(rankingEvent.ranking.every((item) => item.responseId && !item.model));
+    const hiddenDetail = await fetch(`${base}/api/conversations/${rankingEvent.conversationId}`).then((r) => r.json());
+    const hiddenRun = hiddenDetail.conversation.runs[0];
+    assert.equal(hiddenRun.revealed_at, null);
+    assert.ok(hiddenRun.ranking.every((item) => !item.model));
+    assert.equal(hiddenRun.responses.some((item) => item.model && item.content && item.anonymous_id), false);
+
+    const hiddenExport = await fetch(`${base}/api/runs/${rankingEvent.runId}/export.md`);
+    assert.equal(hiddenExport.status, 409);
+
+    const revealNext = await iterator.next();
+    assert.equal(revealNext.done, false);
+    assert.equal(revealNext.value.type, 'answers_revealed');
+    const expected = revealNext.value.responses.filter((item) => item.status === 'success').map((item) => [item.anonymousId, item.model, item.content]);
+
+    const revealedDetail = await fetch(`${base}/api/conversations/${rankingEvent.conversationId}`).then((r) => r.json());
+    const revealedRun = revealedDetail.conversation.runs[0];
+    assert.ok(revealedRun.revealed_at);
+    for (const [anonymousId, model, content] of expected) {
+      assert.ok(revealedRun.ranking.some((item) => item.responseId === anonymousId && item.model === model));
+      assert.ok(revealedRun.responses.some((item) => item.anonymous_id === anonymousId && item.model === model && item.content === content));
+    }
+
+    const revealedExport = await fetch(`${base}/api/runs/${rankingEvent.runId}/export.md`);
+    const markdown = await revealedExport.text();
+    assert.equal(revealedExport.status, 200);
+    for (const [anonymousId, model, content] of expected) {
+      assert.ok(markdown.includes(`### ${anonymousId} / ${model}`));
+      assert.ok(markdown.includes(content));
+    }
+
+    for await (const event of iterator) {
+      if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
+    }
+  } finally {
+    server.close();
+  }
+});
+
 test('after reveal SSE, detail API and markdown export expose the same mapping', async () => {
   const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`)));
   const provider = new DeferredProvider();
