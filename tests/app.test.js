@@ -251,6 +251,8 @@ test('ranking SSE stays anonymous until answers_revealed commits the reveal', as
     }
 
     for await (const event of iterator) {
+      if (event.type === 'model_status' && event.stage === 'improvement' && event.status === 'running') provider.resolve(event.model, `Verbessert ${event.model}`);
+      if (event.type === 'model_status' && event.stage === 're_review' && event.status === 'running') provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
       if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
     }
   } finally {
@@ -296,9 +298,10 @@ test('after reveal SSE, detail API and markdown export expose the same mapping',
 test('OpenRouter run request uses provider context without persisting API key', async () => {
   const secret = 'sk-or-secret-123';
   const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-openrouter-${Date.now()}-${Math.random()}.db`)));
+  const review = ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 });
   const provider = new FakeProvider({
-    'openrouter/a': ['Antwort A', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
-    'openrouter/b': ['Antwort B', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
+    'openrouter/a': ['Antwort A', review, 'Verbessert A', review],
+    'openrouter/b': ['Antwort B', review, 'Verbessert B', review],
     'openrouter/chair': ['Finale Antwort']
   });
   const app = createApp({ config: loadRuntimeConfig(), store, provider });
@@ -511,7 +514,8 @@ async function consumeRun(orchestrator, provider, events) {
   for await (const event of orchestrator.run({ question: 'Q?', councilModels: ['a', 'b'], chairmanModel: 'chair', criteria }, new AbortController().signal)) {
     events.push(event);
     if (event.type === 'model_status' && event.stage === 'answers' && event.status === 'running') provider.resolve(event.model, `Antwort ${event.model}`);
-    if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'running') provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+    if (event.type === 'model_status' && (event.stage === 'reviews' || event.stage === 're_review') && event.status === 'running') provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+    if (event.type === 'model_status' && event.stage === 'improvement' && event.status === 'running') provider.resolve(event.model, `Verbessert ${event.model}`);
     if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
   }
 }

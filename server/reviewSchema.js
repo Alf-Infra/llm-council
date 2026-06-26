@@ -13,6 +13,7 @@ export function validateReviewPayload(payload, anonymousIds, criteriaIds) {
     seen.add(entry.responseId);
     if (typeof entry.rationale !== 'string' || !entry.rationale.trim()) return { ok: false, error: 'Begründung fehlt.' };
     if (!Array.isArray(entry.strengths) || !Array.isArray(entry.weaknesses)) return { ok: false, error: 'Stärken oder Schwächen fehlen.' };
+    if (entry.detailed_analysis !== undefined && typeof entry.detailed_analysis !== 'string') return { ok: false, error: 'detailed_analysis muss ein String sein.' };
     if (!entry.scores || typeof entry.scores !== 'object') return { ok: false, error: 'scores fehlt.' };
     const scoreKeys = Object.keys(entry.scores);
     if (scoreKeys.length !== criteriaIds.length || scoreKeys.some((key) => !criteria.has(key))) return { ok: false, error: 'scores enthält unbekannte oder fehlende Kriterien.' };
@@ -47,7 +48,7 @@ export function buildReviewRepairPrompt(invalidText, error, anonymousIds, criter
     `Erlaubte responseId-Werte: ${anonymousIds.join(', ')}`,
     `Pflichtkriterien: ${criteria.map((c) => c.id).join(', ')}`,
     `Validierungsfehler: ${error}`,
-    'Schema: {"responses":[{"responseId":"Response A","scores":{"correctness":1},"rationale":"kurz","strengths":["..."],"weaknesses":["..."]}],"ranking":["Response A"]}',
+    'Schema: {"responses":[{"responseId":"Response A","scores":{"correctness":1},"rationale":"kurz","strengths":["..."],"weaknesses":["..."],"detailed_analysis":"Freitextanalyse"}],"ranking":["Response A"]}',
     'Ungültige Ausgabe:',
     invalidText
   ].join('\n');
