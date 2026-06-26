@@ -286,3 +286,66 @@ die zeitliche Konsistenz des Reveals:
 - Die bestehenden 20 Tests und alle bisherigen Fixes dürfen nicht regressieren.
 
 Reviewer-Artefakt: `.review-result.json` vom 2026-06-22T08:00:06+02:00`.
+
+## Iteration v1.2 — OpenRouter Provider-Konfiguration
+
+Kevin hat am 2026-06-26 entschieden, die LLM-Council-App zunächst ohne
+LiteLLM-Schicht weiterzuentwickeln. Ziel ist eine direkte OpenRouter-
+Integration über die vorhandene OpenAI-kompatible Chat-Completions-
+Architektur.
+
+Baue die App so um, dass Nutzer OpenRouter direkt in der Eingabemaske
+konfigurieren können:
+
+- Die UI enthält einen klaren OpenRouter-Providerbereich mit:
+  - Base URL, Default `https://openrouter.ai/api/v1`.
+  - API-Key-Eingabe als Passwortfeld.
+  - Frei editierbarer Modellliste.
+  - Button zum Hinzufügen und Entfernen von Modellen.
+  - Verständlicher Status-/Validierungsanzeige.
+- LiteLLM darf in dieser Iteration nicht als eigener Provider-Typ,
+  Proxy-Preset oder empfohlener Pfad eingebaut werden.
+- Die bisherige globale ENV-Konfiguration darf als Backend-Fallback für
+  Entwicklung/Tests erhalten bleiben, die neue UI muss aber direkte
+  OpenRouter-Runs ermöglichen.
+- Der Nutzer kann aus den OpenRouter-Modellen mindestens zwei Council-Modelle
+  und genau ein getrenntes Chairman-Modell auswählen.
+- Council- und Chairman-Auswahl müssen Modellobjekte mit Provider-Kontext
+  verwenden, nicht nur lose Strings. Die Backend-Orchestrierung muss daraus
+  korrekt `providerId`, `baseUrl` und `model` ableiten.
+- Der eingegebene API-Key darf nur für den aktuellen Run verwendet werden.
+  Er darf nicht in SQLite, `config_json`, Conversation-Details, Exporten,
+  `.codex-build.json`, `.test-result.json`, Logs oder Browser-Historien-
+  Projektionen gespeichert oder angezeigt werden.
+- Persistiert werden dürfen nur sichere Metadaten wie Provider-Typ,
+  Provider-Label, Base URL, Modellkennung, Rollen, Laufzeit, Token und
+  Fehlerstatus.
+- Provider-Fehler müssen secretsicher redigiert werden. Antworten wie
+  `401`, `403`, Provider-JSON oder Header dürfen keinen API-Key zurück in UI,
+  SSE oder Persistenz bringen.
+- Die vorhandene Stage-2-Anonymisierung und das Reveal-Timing bleiben
+  unverändert strikt: Vor `answers_revealed` darf weiterhin keine Zuordnung
+  von anonymisierter Antwort zu Ursprungsmodell/Provider durch SSE,
+  Detail-GET oder Export entstehen.
+- Der Markdown-Export nach Reveal soll Provider/Modell transparent anzeigen,
+  aber niemals API-Keys oder andere Zugangsdaten.
+- Ergänze einen sicheren Provider-Test-Endpunkt oder eine gleichwertige
+  UI-Validierung, die OpenRouter-Konfiguration testet, ohne Secrets zu
+  persistieren. Der Test muss in Tests mockbar sein und darf `/health` sowie
+  `/api/config` nicht zu externen Modellaufrufen zwingen.
+- Ergänze Regressionstests fuer:
+  - Run-Request mit OpenRouter-Provider, mehreren Modellen und Chairman.
+  - API-Key wird nicht in persistiertem Run-Config, Detail-API, Export oder
+    sicheren Config-Payloads geleakt.
+  - Provider-Fehler werden redigiert.
+  - Bestehende Anonymisierungs-/Reveal-Tests bleiben gruen.
+  - Bestehende `npm test`, `npm run build`, `/health`, Root-Route und
+    `process.env.PORT`-Konvention bleiben gruen.
+
+Nicht-Ziele fuer v1.2:
+
+- Keine LiteLLM-/OpenClaw-Proxy-Integration.
+- Keine native Anthropic-, Gemini- oder OpenAI-SDK-Integration.
+- Keine Speicherung von API-Keys im Browser-LocalStorage oder Backend.
+- Keine automatische Modellkatalog-Synchronisierung von OpenRouter; die
+  Modellliste bleibt frei editierbar.
