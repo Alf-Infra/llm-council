@@ -44,6 +44,10 @@ textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px solid #
 .panelHeader { display: flex; justify-content: space-between; align-items: center; }
 h2 { margin: 0 0 12px; font-size: 16px; }
 .icon { width: 36px; padding: 0; }
+.providerGrid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto; gap: 10px; align-items: end; margin-bottom: 10px; }
+.providerGrid label { display: flex; flex-direction: column; gap: 5px; color: #516067; font-size: 13px; }
+.providerGrid input { width: 100%; border: 1px solid #c9d1d6; border-radius: 6px; padding: 8px; color: #1e2528; }
+.providerStatus { border: 1px solid #d3dadf; background: #f6f9fa; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; color: #516067; }
 .modelList { display: flex; flex-direction: column; gap: 8px; }
 .modelRow { display: grid; grid-template-columns: minmax(120px, 1fr) auto auto 36px; gap: 8px; align-items: center; }
 .modelRow input[type="text"], .modelRow input:not([type]) { width: 100%; border: 1px solid #c9d1d6; border-radius: 6px; padding: 8px; }
@@ -68,6 +72,7 @@ td small { display: block; margin-top: 3px; overflow-wrap: anywhere; }
   .shell { grid-template-columns: 1fr; }
   .sidebar { min-height: auto; }
   .configGrid, .columns { grid-template-columns: 1fr; }
+  .providerGrid { grid-template-columns: 1fr; }
   .modelRow { grid-template-columns: 1fr; }
   .criterion { grid-template-columns: 1fr; }
 }

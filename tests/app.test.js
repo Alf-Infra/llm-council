@@ -8,12 +8,33 @@ import { createApp } from '../server/app.js';
 import { loadRuntimeConfig } from '../server/config.js';
 import { CouncilStore, createDb } from '../server/db.js';
 import { CouncilOrchestrator } from '../server/orchestrator.js';
+import { OpenAICompatibleProvider } from '../server/provider.js';
 
 const criteria = [
   { id: 'correctness', label: 'Korrektheit', weight: 1 },
   { id: 'depth', label: 'Tiefe', weight: 1 },
   { id: 'usefulness', label: 'Praxisnutzen', weight: 1 }
 ];
+
+class FakeProvider {
+  constructor(map) {
+    this.map = map;
+    this.calls = [];
+  }
+
+  async chat({ model, provider, messages }) {
+    this.calls.push({ model, provider, messages });
+    const script = this.map[model] || [];
+    const next = Array.isArray(script) ? script.shift() : script;
+    if (next instanceof Error) throw next;
+    if (typeof next === 'function') return next({ model, provider, messages });
+    return {
+      content: next || `answer from ${model}`,
+      usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+      latencyMs: 5
+    };
+  }
+}
 
 test('health and safe config endpoints work without model calls', async () => {
   const app = createApp({
@@ -272,11 +293,106 @@ test('after reveal SSE, detail API and markdown export expose the same mapping',
   }
 });
 
+test('OpenRouter run request uses provider context without persisting API key', async () => {
+  const secret = 'sk-or-secret-123';
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-openrouter-${Date.now()}-${Math.random()}.db`)));
+  const provider = new FakeProvider({
+    'openrouter/a': ['Antwort A', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
+    'openrouter/b': ['Antwort B', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
+    'openrouter/chair': ['Finale Antwort']
+  });
+  const app = createApp({ config: loadRuntimeConfig(), store, provider });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const response = await fetch(`${base}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(openRouterRunRequest(secret))
+    });
+    assert.equal(response.status, 200);
+    const events = parseSse(await response.text()).map((frame) => frame.data);
+    const final = events.find((event) => event.type === 'final');
+    assert.ok(final);
+    assert.equal(provider.calls.every((call) => call.model.startsWith('openrouter/')), true);
+    assert.equal(provider.calls.every((call) => call.provider?.baseUrl === 'https://openrouter.ai/api/v1'), true);
+    assert.equal(provider.calls.every((call) => call.provider?.apiKey === secret), true);
+
+    const run = store.getRun(final.runId);
+    assert.equal(JSON.stringify(run.config).includes(secret), false);
+
+    const detail = await fetch(`${base}/api/conversations/${final.conversationId}`).then((r) => r.json());
+    assert.equal(JSON.stringify(detail).includes(secret), false);
+    assert.ok(detail.conversation.runs[0].responses.every((item) => item.provider_label === 'OpenRouter'));
+
+    const config = await fetch(`${base}/api/config`).then((r) => r.json());
+    assert.equal(JSON.stringify(config).includes(secret), false);
+
+    const exportResponse = await fetch(`${base}/api/runs/${final.runId}/export.md`);
+    const markdown = await exportResponse.text();
+    assert.equal(exportResponse.status, 200);
+    assert.equal(markdown.includes(secret), false);
+    assert.ok(markdown.includes('OpenRouter / openrouter/a'));
+  } finally {
+    server.close();
+  }
+});
+
+test('provider test endpoint redacts API keys from provider errors', async () => {
+  const secret = 'sk-or-leaked-value';
+  const fetchImpl = async () => new Response(JSON.stringify({ error: `bad key ${secret}`, authorization: `Bearer ${secret}` }), { status: 401 });
+  const provider = new OpenAICompatibleProvider(loadRuntimeConfig(), fetchImpl);
+  const app = createApp({
+    dbPath: path.join(os.tmpdir(), `llm-council-provider-error-${Date.now()}-${Math.random()}.db`),
+    config: loadRuntimeConfig(),
+    provider
+  });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const response = await fetch(`${base}/api/provider/test`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: { id: 'openrouter', type: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: secret },
+        model: 'openrouter/a'
+      })
+    });
+    const body = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(JSON.stringify(body).includes(secret), false);
+    assert.equal(JSON.stringify(body).includes('Bearer sk-or'), false);
+  } finally {
+    server.close();
+  }
+});
+
 function validRunRequest() {
   return {
     question: 'Was ist robuste Fehlerbehandlung?',
     councilModels: ['model-a', 'model-b'],
     chairmanModel: 'chairman-model',
+    criteria: [
+      { id: 'correctness', weight: 1 },
+      { id: 'depth', weight: 1 },
+      { id: 'usefulness', weight: 1 }
+    ]
+  };
+}
+
+function openRouterRunRequest(apiKey) {
+  const provider = { id: 'openrouter', type: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey };
+  return {
+    question: 'Was ist robuste Fehlerbehandlung?',
+    councilModels: [
+      { provider, model: 'openrouter/a' },
+      { provider, model: 'openrouter/b' }
+    ],
+    chairmanModel: { provider, model: 'openrouter/chair' },
     criteria: [
       { id: 'correctness', weight: 1 },
       { id: 'depth', weight: 1 },

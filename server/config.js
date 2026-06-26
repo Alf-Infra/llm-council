@@ -26,6 +26,7 @@ export function safeUiConfig(config = loadRuntimeConfig()) {
     apiBaseUrlConfigured: Boolean(config.apiBaseUrl),
     requestTimeoutMs: config.requestTimeoutMs,
     maxOutputTokens: config.maxOutputTokens,
+    openRouterDefaultBaseUrl: 'https://openrouter.ai/api/v1',
     defaults: config.defaults,
     criteria: config.criteria
   };

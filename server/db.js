@@ -39,7 +39,12 @@ export function createDb(dbPath = path.join(process.cwd(), 'data', 'llm-council.
     CREATE TABLE IF NOT EXISTS model_responses (
       id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL,
+      model_key TEXT,
       model TEXT NOT NULL,
+      provider_id TEXT,
+      provider_type TEXT,
+      provider_label TEXT,
+      provider_base_url TEXT,
       anonymous_id TEXT,
       status TEXT NOT NULL,
       content TEXT,
@@ -53,7 +58,12 @@ export function createDb(dbPath = path.join(process.cwd(), 'data', 'llm-council.
     CREATE TABLE IF NOT EXISTS reviews (
       id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL,
+      reviewer_key TEXT,
       reviewer_model TEXT NOT NULL,
+      provider_id TEXT,
+      provider_type TEXT,
+      provider_label TEXT,
+      provider_base_url TEXT,
       status TEXT NOT NULL,
       review_json TEXT,
       error TEXT,
@@ -133,19 +143,23 @@ export class CouncilStore {
 
   addResponse(response) {
     const created = now();
-    this.db.prepare(`INSERT INTO model_responses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id('res'), response.runId, response.model, response.anonymousId ?? null, response.status, response.content ?? null, response.error ?? null,
+    const provider = response.provider || {};
+    this.db.prepare(`INSERT INTO model_responses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id('res'), response.runId, response.modelKey ?? response.model, response.model, provider.id ?? null, provider.type ?? null, provider.label ?? null, provider.baseUrl ?? null,
+        response.anonymousId ?? null, response.status, response.content ?? null, response.error ?? null,
         response.latencyMs ?? null, response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null, response.usage?.total_tokens ?? null, created);
   }
 
-  setAnonymousId(runId, model, anonymousId) {
-    this.db.prepare('UPDATE model_responses SET anonymous_id = ? WHERE run_id = ? AND model = ? AND status = ?').run(anonymousId, runId, model, 'success');
+  setAnonymousId(runId, modelKey, anonymousId) {
+    this.db.prepare('UPDATE model_responses SET anonymous_id = ? WHERE run_id = ? AND model_key = ? AND status = ?').run(anonymousId, runId, modelKey, 'success');
   }
 
   addReview(review) {
     const created = now();
-    this.db.prepare(`INSERT INTO reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id('rev'), review.runId, review.reviewerModel, review.status, review.review ? JSON.stringify(review.review) : null, review.error ?? null,
+    const provider = review.provider || {};
+    this.db.prepare(`INSERT INTO reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id('rev'), review.runId, review.reviewerKey ?? review.reviewerModel, review.reviewerModel, provider.id ?? null, provider.type ?? null, provider.label ?? null, provider.baseUrl ?? null,
+        review.status, review.review ? JSON.stringify(review.review) : null, review.error ?? null,
         review.latencyMs ?? null, review.usage?.prompt_tokens ?? null, review.usage?.completion_tokens ?? null, review.usage?.total_tokens ?? null, created);
   }
 
@@ -206,6 +220,26 @@ function normalizeRun(row) {
 function migrate(db) {
   const columns = db.prepare('PRAGMA table_info(runs)').all().map((row) => row.name);
   if (!columns.includes('revealed_at')) db.exec('ALTER TABLE runs ADD COLUMN revealed_at TEXT');
+  addColumn(db, 'model_responses', 'model_key TEXT');
+  addColumn(db, 'model_responses', 'provider_id TEXT');
+  addColumn(db, 'model_responses', 'provider_type TEXT');
+  addColumn(db, 'model_responses', 'provider_label TEXT');
+  addColumn(db, 'model_responses', 'provider_base_url TEXT');
+  addColumn(db, 'reviews', 'reviewer_key TEXT');
+  addColumn(db, 'reviews', 'provider_id TEXT');
+  addColumn(db, 'reviews', 'provider_type TEXT');
+  addColumn(db, 'reviews', 'provider_label TEXT');
+  addColumn(db, 'reviews', 'provider_base_url TEXT');
+  db.exec(`
+    UPDATE model_responses SET model_key = model WHERE model_key IS NULL;
+    UPDATE reviews SET reviewer_key = reviewer_model WHERE reviewer_key IS NULL;
+  `);
+}
+
+function addColumn(db, table, definition) {
+  const name = definition.split(/\s+/)[0];
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
+  if (!columns.includes(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
 }
 
 function parseJson(value) {

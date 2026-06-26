@@ -2,6 +2,7 @@ import { anonymizeResponses } from './anonymize.js';
 import { aggregateReviews } from './aggregate.js';
 import { buildReviewRepairPrompt, extractJsonObject, validateReviewPayload } from './reviewSchema.js';
 import { now } from './db.js';
+import { safeModelRef } from './validation.js';
 
 export class CouncilOrchestrator {
   constructor({ provider, store, randomSeedFactory = (runId) => runId, hooks = {} }) {
@@ -34,7 +35,7 @@ export class CouncilOrchestrator {
       }
 
       const anonymous = anonymizeResponses(successes, this.randomSeedFactory(run.id));
-      for (const item of anonymous) this.store.setAnonymousId(run.id, item.model, item.anonymousId);
+      for (const item of anonymous) this.store.setAnonymousId(run.id, item.modelKey, item.anonymousId);
       yield emit('answers_complete', { responses: anonymous.map(stripPreReviewMapping) });
 
       this.store.updateRun(run.id, { status: 'running', stage: 'reviews' });
@@ -73,25 +74,27 @@ export class CouncilOrchestrator {
   async *collectAnswers(runId, input, context, signal, emit) {
     const queue = new AsyncEventQueue();
     const results = new Array(input.councilModels.length);
-    const tasks = input.councilModels.map(async (model, index) => {
-      queue.push(emit('model_status', { model, stage: 'answers', status: 'running' }));
+    const tasks = input.councilModels.map(async (modelRef, index) => {
+      const model = publicModelName(modelRef);
+      queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'answers', status: 'running' }));
       try {
         const result = await this.provider.chat({
-          model,
+          model: rawModelName(modelRef),
+          provider: modelRef.provider,
           signal,
           messages: buildAnswerMessages(input.question, context)
         });
-        const item = { model, status: 'success', content: result.content, latencyMs: result.latencyMs, usage: result.usage };
+        const item = { model, modelKey: modelKey(modelRef), provider: publicProvider(modelRef), status: 'success', content: result.content, latencyMs: result.latencyMs, usage: result.usage };
         this.store.addResponse({ runId, ...item });
-        queue.push(emit('model_status', { model, stage: 'answers', status: 'success', response: publicResponseStatus(item) }));
+        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'answers', status: 'success', response: publicResponseStatus(item) }));
         results[index] = item;
         return item;
       } catch (error) {
         if (signal?.aborted) throw error;
-        const item = { model, status: 'failed', error: safeMessage(error) };
+        const item = { model, modelKey: modelKey(modelRef), provider: publicProvider(modelRef), status: 'failed', error: safeMessage(error) };
         this.store.addResponse({ runId, ...item });
         this.store.addError(runId, `answer:${model}`, item.error);
-        queue.push(emit('model_status', { model, stage: 'answers', status: 'failed', error: item.error }));
+        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'answers', status: 'failed', error: item.error }));
         results[index] = item;
         return item;
       }
@@ -107,23 +110,24 @@ export class CouncilOrchestrator {
     const anonymousIds = anonymous.map((item) => item.anonymousId);
     const criteriaIds = input.criteria.map((item) => item.id);
     const results = new Array(input.councilModels.length);
-    const tasks = input.councilModels.map(async (model, index) => {
-      queue.push(emit('model_status', { model, stage: 'reviews', status: 'running' }));
+    const tasks = input.councilModels.map(async (modelRef, index) => {
+      const model = publicModelName(modelRef);
+      queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'reviews', status: 'running' }));
       const prompt = buildReviewPrompt(input.question, anonymous, input.criteria);
       try {
-        const first = await this.provider.chat({ model, signal, responseFormatJson: true, messages: [{ role: 'system', content: reviewSystemPrompt(input.criteria) }, { role: 'user', content: prompt }] });
-        const parsed = await this.parseOrRepairReview(model, first.content, first.usage, first.latencyMs, anonymousIds, criteriaIds, input.criteria, signal);
-        const item = { reviewerModel: model, status: 'success', review: parsed.review, latencyMs: parsed.latencyMs, usage: mergeUsage(first.usage, parsed.repairUsage) };
+        const first = await this.provider.chat({ model: rawModelName(modelRef), provider: modelRef.provider, signal, responseFormatJson: true, messages: [{ role: 'system', content: reviewSystemPrompt(input.criteria) }, { role: 'user', content: prompt }] });
+        const parsed = await this.parseOrRepairReview(modelRef, first.content, first.usage, first.latencyMs, anonymousIds, criteriaIds, input.criteria, signal);
+        const item = { reviewerModel: model, reviewerKey: modelKey(modelRef), provider: publicProvider(modelRef), status: 'success', review: parsed.review, latencyMs: parsed.latencyMs, usage: mergeUsage(first.usage, parsed.repairUsage) };
         this.store.addReview({ runId, ...item });
-        queue.push(emit('model_status', { model, stage: 'reviews', status: 'success', review: item.review }));
+        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'reviews', status: 'success', review: item.review }));
         results[index] = item;
         return item;
       } catch (error) {
         if (signal?.aborted) throw error;
-        const item = { reviewerModel: model, status: 'failed', error: safeMessage(error) };
+        const item = { reviewerModel: model, reviewerKey: modelKey(modelRef), provider: publicProvider(modelRef), status: 'failed', error: safeMessage(error) };
         this.store.addReview({ runId, ...item });
         this.store.addError(runId, `review:${model}`, item.error);
-        queue.push(emit('model_status', { model, stage: 'reviews', status: 'failed', error: item.error }));
+        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'reviews', status: 'failed', error: item.error }));
         results[index] = item;
         return item;
       }
@@ -134,7 +138,7 @@ export class CouncilOrchestrator {
     return { results };
   }
 
-  async parseOrRepairReview(model, content, usage, latencyMs, anonymousIds, criteriaIds, criteria, signal) {
+  async parseOrRepairReview(modelRef, content, usage, latencyMs, anonymousIds, criteriaIds, criteria, signal) {
     try {
       const payload = extractJsonObject(content);
       const valid = validateReviewPayload(payload, anonymousIds, criteriaIds);
@@ -142,7 +146,8 @@ export class CouncilOrchestrator {
       return { review: valid.value, usage, latencyMs };
     } catch (firstError) {
       const repair = await this.provider.chat({
-        model,
+        model: rawModelName(modelRef),
+        provider: modelRef.provider,
         signal,
         responseFormatJson: true,
         messages: [{ role: 'system', content: reviewSystemPrompt(criteria) }, { role: 'user', content: buildReviewRepairPrompt(content, firstError.message, anonymousIds, criteria) }]
@@ -157,16 +162,17 @@ export class CouncilOrchestrator {
   async runChairman(runId, input, answers, reviews, ranking, signal) {
     try {
       const result = await this.provider.chat({
-        model: input.chairmanModel,
+        model: rawModelName(input.chairmanModel),
+        provider: input.chairmanModel.provider,
         signal,
         messages: [
           { role: 'system', content: 'Du bist Chairman eines LLM-Councils. Schreibe eine eigenständige, transparente finale Antwort. Berücksichtige Konsens, Konflikte und Unsicherheiten.' },
           { role: 'user', content: buildChairmanPrompt(input.question, answers, reviews, ranking) }
         ]
       });
-      return { status: 'success', model: input.chairmanModel, content: result.content, latencyMs: result.latencyMs, usage: result.usage };
+      return { status: 'success', model: publicModelName(input.chairmanModel), provider: publicProvider(input.chairmanModel), content: result.content, latencyMs: result.latencyMs, usage: result.usage };
     } catch (error) {
-      return { status: 'failed', model: input.chairmanModel, error: safeMessage(error) };
+      return { status: 'failed', model: publicModelName(input.chairmanModel), provider: publicProvider(input.chairmanModel), error: safeMessage(error) };
     }
   }
 }
@@ -194,7 +200,7 @@ function buildReviewPrompt(question, anonymous, criteria) {
 }
 
 function buildChairmanPrompt(question, answers, reviews, ranking) {
-  return JSON.stringify({ question, answers: answers.map(({ model, content }) => ({ model, content })), reviews, ranking }, null, 2);
+  return JSON.stringify({ question, answers: answers.map(({ model, provider, content }) => ({ model, provider, content })), reviews, ranking }, null, 2);
 }
 
 function summarizeRun(started, answerResults, reviewResults, chairman) {
@@ -215,7 +221,7 @@ function summarizeRun(started, answerResults, reviewResults, chairman) {
 }
 
 function publicResponseStatus(item) {
-  return { model: item.model, status: item.status, latencyMs: item.latencyMs, usage: item.usage };
+  return { model: item.model, provider: item.provider, status: item.status, latencyMs: item.latencyMs, usage: item.usage };
 }
 
 function stripPreReviewMapping(item) {
@@ -223,9 +229,10 @@ function stripPreReviewMapping(item) {
 }
 
 function revealResponse(item, anonymous) {
-  const mapped = anonymous.find((response) => response.model === item.model);
+  const mapped = anonymous.find((response) => response.modelKey === item.modelKey);
   return {
     model: item.model,
+    provider: item.provider,
     anonymousId: mapped?.anonymousId || null,
     status: item.status,
     content: item.content,
@@ -236,7 +243,7 @@ function revealResponse(item, anonymous) {
 }
 
 function redactRankingModel(item) {
-  const { model: _model, ...safe } = item;
+  const { model: _model, provider: _provider, ...safe } = item;
   return safe;
 }
 
@@ -251,14 +258,36 @@ function mergeUsage(a, b) {
 
 function redactConfig(input) {
   return {
-    councilModels: input.councilModels,
-    chairmanModel: input.chairmanModel,
+    councilModels: input.councilModels.map((item) => (typeof item === 'string' ? item : safeModelRef(item))),
+    chairmanModel: typeof input.chairmanModel === 'string' ? input.chairmanModel : safeModelRef(input.chairmanModel),
     criteria: input.criteria
   };
 }
 
 function safeMessage(error) {
   return String(error?.message || error || 'Unbekannter Fehler').replace(/Bearer\s+[A-Za-z0-9._-]+/g, 'Bearer [redacted]').slice(0, 500);
+}
+
+function publicModelName(modelRef) {
+  return typeof modelRef === 'string' ? modelRef : modelRef.model;
+}
+
+function rawModelName(modelRef) {
+  return typeof modelRef === 'string' ? modelRef : modelRef.model;
+}
+
+function modelKey(modelRef) {
+  return typeof modelRef === 'string' ? modelRef : modelRef.key;
+}
+
+function publicProvider(modelRef) {
+  if (typeof modelRef === 'string') return null;
+  return {
+    id: modelRef.provider.id,
+    type: modelRef.provider.type,
+    label: modelRef.provider.label,
+    baseUrl: modelRef.provider.baseUrl
+  };
 }
 
 class AsyncEventQueue {

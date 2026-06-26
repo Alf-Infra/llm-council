@@ -21,3 +21,17 @@ test('safe UI config never exposes API key', () => {
   assert.equal('apiKey' in safe, false);
   assert.equal(JSON.stringify(safe).includes('secret-key'), false);
 });
+
+test('normalizes OpenRouter model objects with provider context', () => {
+  const provider = { id: 'openrouter', type: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-or-secret' };
+  const result = normalizeRunRequest({
+    question: 'Q?',
+    councilModels: [{ provider, model: 'model-a' }, { provider, model: 'model-b' }],
+    chairmanModel: { provider, model: 'model-c' },
+    criteria: [{ id: 'correctness', weight: 1 }]
+  }, loadRuntimeConfig());
+  assert.equal(result.ok, true);
+  assert.equal(result.value.councilModels[0].provider.apiKey, 'sk-or-secret');
+  assert.equal(result.value.councilModels[0].provider.baseUrl, 'https://openrouter.ai/api/v1');
+  assert.equal(result.value.councilModels[0].model, 'model-a');
+});

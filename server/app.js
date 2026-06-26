@@ -5,7 +5,7 @@ import { CouncilStore, createDb } from './db.js';
 import { loadRuntimeConfig, safeUiConfig } from './config.js';
 import { OpenAICompatibleProvider } from './provider.js';
 import { CouncilOrchestrator } from './orchestrator.js';
-import { normalizeRunRequest } from './validation.js';
+import { normalizeModelRef, normalizeRunRequest } from './validation.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -22,6 +22,21 @@ export function createApp(options = {}) {
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
   app.get('/api/config', (_req, res) => res.json(safeUiConfig(config)));
+  app.post('/api/provider/test', async (req, res) => {
+    const modelRef = normalizeModelRef(req.body, config);
+    if (!modelRef) return res.status(400).json({ ok: false, error: 'Bitte Provider und Modell angeben.' });
+    try {
+      const result = await provider.chat({
+        model: modelRef.model,
+        provider: modelRef.provider,
+        messages: [{ role: 'user', content: 'Reply with OK.' }],
+        signal: AbortSignal.timeout(Math.min(config.requestTimeoutMs, 15000))
+      });
+      return res.json({ ok: true, model: modelRef.model, provider: publicProviderFromRow(modelRef.provider), latencyMs: result.latencyMs, usage: result.usage || null });
+    } catch (error) {
+      return res.status(502).json({ ok: false, error: safePublicError(error, modelRef.provider.apiKey) });
+    }
+  });
   app.get('/api/conversations', (_req, res) => res.json({ conversations: store.listConversations() }));
   app.get('/api/conversations/:id', (req, res) => {
     const conversation = store.getConversation(req.params.id);
@@ -110,6 +125,7 @@ function projectRunForBrowser(run) {
     ranking: Array.isArray(run.ranking) ? run.ranking.map(redactRankingModel) : run.ranking,
     modelStatuses: responses.map((item) => ({
       model: item.model,
+      provider: publicProviderFromRow(item),
       status: item.status,
       error: item.status === 'failed' ? item.error : undefined,
       latency_ms: item.latency_ms,
@@ -124,6 +140,7 @@ function projectRunForBrowser(run) {
         }
         return {
           model: item.model,
+          provider: publicProviderFromRow(item),
           status: item.status,
           error: item.error,
           latency_ms: item.latency_ms,
@@ -137,7 +154,7 @@ function projectRunForBrowser(run) {
 }
 
 function redactRankingModel(item) {
-  const { model: _model, ...safe } = item;
+  const { model: _model, provider: _provider, ...safe } = item;
   return safe;
 }
 
@@ -158,13 +175,13 @@ function renderExport({ run, question, responses, reviews, ranking }) {
     question,
     '',
     '## Rangliste',
-    ...(ranking || []).map((item) => `${item.rank}. ${item.responseId} (${item.model}) - ${item.weightedScore}`),
+    ...(ranking || []).map((item) => `${item.rank}. ${item.responseId} (${providerModelLabel(item)}) - ${item.weightedScore}`),
     '',
     '## Modellantworten',
-    ...responses.map((item) => `### ${item.anonymous_id || '-'} / ${item.model}\nStatus: ${item.status}, Laufzeit: ${item.latency_ms ?? '-'} ms, Tokens: ${item.total_tokens ?? '-'}\n\n${item.content || item.error || ''}`),
+    ...responses.map((item) => `### ${item.anonymous_id || '-'} / ${providerModelLabel(item)}\nStatus: ${item.status}, Laufzeit: ${item.latency_ms ?? '-'} ms, Tokens: ${item.total_tokens ?? '-'}\n\n${item.content || item.error || ''}`),
     '',
     '## Reviews',
-    ...reviews.map((item) => `### ${item.reviewer_model}\nStatus: ${item.status}\n\n\`\`\`json\n${JSON.stringify(item.review || { error: item.error }, null, 2)}\n\`\`\``),
+    ...reviews.map((item) => `### ${providerReviewerLabel(item)}\nStatus: ${item.status}\n\n\`\`\`json\n${JSON.stringify(item.review || { error: item.error }, null, 2)}\n\`\`\``),
     '',
     '## Finale Antwort',
     run.final_answer || run.chairman_error || '',
@@ -176,6 +193,26 @@ function renderExport({ run, question, responses, reviews, ranking }) {
   ].join('\n\n');
 }
 
-function safePublicError(error) {
-  return String(error?.message || error || 'Unbekannter Fehler').slice(0, 500);
+function publicProviderFromRow(row) {
+  const id = row?.provider_id || row?.id;
+  const type = row?.provider_type || row?.type;
+  const label = row?.provider_label || row?.label;
+  const baseUrl = row?.provider_base_url || row?.baseUrl;
+  return id || type || label || baseUrl ? { id, type, label, baseUrl } : null;
+}
+
+function providerModelLabel(item) {
+  const provider = item.provider || publicProviderFromRow(item);
+  return provider?.label ? `${provider.label} / ${item.model}` : item.model;
+}
+
+function providerReviewerLabel(item) {
+  const provider = item.provider || publicProviderFromRow(item);
+  return provider?.label ? `${provider.label} / ${item.reviewer_model}` : item.reviewer_model;
+}
+
+function safePublicError(error, apiKey = '') {
+  let message = String(error?.message || error || 'Unbekannter Fehler');
+  if (apiKey) message = message.split(apiKey).join('[redacted]');
+  return message.replace(/Bearer\s+[A-Za-z0-9._-]+/g, 'Bearer [redacted]').slice(0, 500);
 }

@@ -18,6 +18,9 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [question, setQuestion] = useState('');
+  const [providerBaseUrl, setProviderBaseUrl] = useState('https://openrouter.ai/api/v1');
+  const [providerApiKey, setProviderApiKey] = useState('');
+  const [providerStatus, setProviderStatus] = useState('');
   const [models, setModels] = useState(['gpt-5.5', 'gpt-5.4', 'claude-sonnet-4-6', 'gemini-3-pro-preview']);
   const [selectedCouncil, setSelectedCouncil] = useState(['gpt-5.5', 'gpt-5.4']);
   const [chairmanModel, setChairmanModel] = useState('claude-sonnet-4-6');
@@ -31,6 +34,7 @@ function App() {
   useEffect(() => {
     Promise.all([fetch('/api/config').then((r) => r.json()), fetch('/api/conversations').then((r) => r.json())]).then(([cfg, list]) => {
       setConfig(cfg);
+      setProviderBaseUrl(cfg.openRouterDefaultBaseUrl || 'https://openrouter.ai/api/v1');
       setModels(cfg.defaults);
       setSelectedCouncil(cfg.defaults.slice(0, 2));
       setChairmanModel(cfg.defaults[2] || cfg.defaults[0]);
@@ -77,16 +81,51 @@ function App() {
     setSelectedCouncil(selectedCouncil.includes(model) ? selectedCouncil.filter((m) => m !== model) : [...selectedCouncil, model]);
   }
 
+  function modelRef(model) {
+    return {
+      provider: {
+        id: 'openrouter',
+        type: 'openrouter',
+        label: 'OpenRouter',
+        baseUrl: providerBaseUrl.trim(),
+        apiKey: providerApiKey
+      },
+      model: model.trim()
+    };
+  }
+
   function validate() {
     const activeCriteria = criteria.filter((item) => item.enabled);
+    const trimmedModels = models.map((m) => m.trim()).filter(Boolean);
     const problems = [];
     if (!question.trim()) problems.push('Bitte eine Frage eingeben.');
+    if (!providerBaseUrl.trim()) problems.push('Bitte eine OpenRouter Base URL angeben.');
     if (selectedCouncil.length < 2) problems.push('Bitte mindestens zwei Council-Modelle wählen.');
     if (!chairmanModel) problems.push('Bitte genau ein Chairman-Modell wählen.');
-    if (new Set(selectedCouncil).size !== selectedCouncil.length || new Set(models.map((m) => m.trim())).size !== models.length) problems.push('Modellkennungen dürfen nicht doppelt vorkommen.');
+    if (new Set(selectedCouncil).size !== selectedCouncil.length || new Set(trimmedModels).size !== trimmedModels.length) problems.push('Modellkennungen dürfen nicht doppelt vorkommen.');
     if (selectedCouncil.includes(chairmanModel)) problems.push('Chairman-Modell muss getrennt von den Council-Modellen sein.');
     if (!activeCriteria.length) problems.push('Bitte mindestens ein Kriterium aktivieren.');
     return problems;
+  }
+
+  async function testProvider() {
+    const model = selectedCouncil[0] || models.find(Boolean);
+    if (!model || !providerBaseUrl.trim()) {
+      setProviderStatus('Bitte Base URL und mindestens ein Modell angeben.');
+      return;
+    }
+    setProviderStatus('Teste OpenRouter...');
+    try {
+      const response = await fetch('/api/provider/test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(modelRef(model))
+      });
+      const body = await response.json();
+      setProviderStatus(body.ok ? `Verbindung ok (${body.latencyMs ?? '-'} ms).` : body.error || 'Provider-Test fehlgeschlagen.');
+    } catch (err) {
+      setProviderStatus(err.message || 'Provider-Test fehlgeschlagen.');
+    }
   }
 
   async function startRun() {
@@ -106,8 +145,8 @@ function App() {
         body: JSON.stringify({
           question,
           conversationId: selectedConversation,
-          councilModels: selectedCouncil,
-          chairmanModel,
+          councilModels: selectedCouncil.map(modelRef),
+          chairmanModel: modelRef(chairmanModel),
           criteria: criteria.filter((item) => item.enabled).map(({ id, weight }) => ({ id, weight }))
         }),
         signal: controller.signal
@@ -167,7 +206,13 @@ function App() {
 
         <section className="configGrid">
           <div className="panel">
-            <div className="panelHeader"><h2>Modelle</h2><button className="icon" onClick={addModel} title="Modell hinzufügen"><Plus size={16} /></button></div>
+            <div className="panelHeader"><h2>OpenRouter</h2><button className="icon" onClick={addModel} title="Modell hinzufügen"><Plus size={16} /></button></div>
+            <div className="providerGrid">
+              <label>Base URL<input value={providerBaseUrl} onChange={(e) => setProviderBaseUrl(e.target.value)} /></label>
+              <label>API-Key<input type="password" value={providerApiKey} onChange={(e) => setProviderApiKey(e.target.value)} autoComplete="off" placeholder="sk-or-..." /></label>
+              <button onClick={testProvider}>Provider testen</button>
+            </div>
+            {providerStatus && <div className="providerStatus">{providerStatus}</div>}
             <div className="modelList">
               {models.map((model, index) => (
                 <div className="modelRow" key={`${model}-${index}`}>

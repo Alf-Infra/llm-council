@@ -25,6 +25,7 @@ export function aggregateReviews(validReviews, anonymousResponses, criteria) {
     return {
       responseId: response.anonymousId,
       model: response.model,
+      provider: response.provider,
       averages,
       weightedScore: Number((weightTotal ? weightedTotal / weightTotal : 0).toFixed(2)),
       validVotes: votes
