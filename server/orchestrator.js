@@ -237,6 +237,7 @@ export class CouncilOrchestrator {
         model: rawModelName(input.chairmanModel),
         provider: input.chairmanModel.provider,
         signal,
+        maxOutputTokens: 16384,
         messages: [
           { role: 'system', content: 'Du bist Chairman eines LLM-Councils. Deine Aufgabe: (1) Identifiziere Konsenspunkte über alle Antworten. (2) Löse Konflikte und Widersprüche mit Begründung. (3) Fülle Lücken, die einzelne Antworten übersehen haben. (4) Schreibe eine finale Antwort mit Quellenattribution (z.B. "Laut Modell X..."). Strukturiere deine Antwort klar mit Überschriften.' },
           { role: 'user', content: buildChairmanPrompt(input.question, answers, reviews, ranking) }

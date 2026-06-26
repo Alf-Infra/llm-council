@@ -4,12 +4,12 @@ export class OpenAICompatibleProvider {
     this.fetch = fetchImpl;
   }
 
-  async chat({ model, provider, messages, temperature = 0.2, signal, responseFormatJson = false }) {
+  async chat({ model, provider, messages, temperature = 0.2, signal, responseFormatJson = false, maxOutputTokens } = {}) {
     const callConfig = {
       apiBaseUrl: provider?.baseUrl || this.config.apiBaseUrl,
       apiKey: provider?.apiKey || this.config.apiKey,
       requestTimeoutMs: provider?.requestTimeoutMs || this.config.requestTimeoutMs,
-      maxOutputTokens: provider?.maxOutputTokens || this.config.maxOutputTokens
+      maxOutputTokens: maxOutputTokens || provider?.maxOutputTokens || this.config.maxOutputTokens
     };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), callConfig.requestTimeoutMs);

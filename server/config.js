@@ -11,7 +11,7 @@ export function loadRuntimeConfig(env = process.env) {
     apiBaseUrl: env.LLM_API_BASE_URL || 'http://localhost:4000/v1',
     apiKey: env.LLM_API_KEY || '',
     requestTimeoutMs: Number.parseInt(env.LLM_REQUEST_TIMEOUT_MS || '120000', 10),
-    maxOutputTokens: Number.parseInt(env.LLM_MAX_OUTPUT_TOKENS || '2048', 10),
+    maxOutputTokens: Number.parseInt(env.LLM_MAX_OUTPUT_TOKENS || '4096', 10),
     defaults: ['gpt-5.5', 'gpt-5.4', 'claude-sonnet-4-6', 'gemini-3-pro-preview'],
     criteria: [
       { id: 'correctness', label: 'Korrektheit', defaultWeight: 1 },
