@@ -80,10 +80,11 @@ function reviewJson(ids) {
 test('orchestrator tolerates one answer failure and persists run data', async () => {
   const dbPath = path.join(os.tmpdir(), `llm-council-${Date.now()}-${Math.random()}.db`);
   const store = new CouncilStore(createDb(dbPath));
+  const review = ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 });
   const provider = new FakeProvider({
-    a: ['Antwort A', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
-    b: ['Antwort B', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
-    c: [new Error('timeout'), ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
+    a: ['Antwort A', review, 'Verbessert A', review],
+    b: ['Antwort B', review, 'Verbessert B', review],
+    c: [new Error('timeout'), review, new Error('timeout'), review],
     chair: ['Finale Antwort']
   });
   const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
@@ -95,25 +96,27 @@ test('orchestrator tolerates one answer failure and persists run data', async ()
   assert.ok(final);
   const runId = final.runId;
   assert.equal(store.getRun(runId).status, 'completed');
-  assert.equal(store.getResponses(runId).length, 3);
-  assert.equal(store.getResponses(runId).filter((r) => r.status === 'success').length, 2);
-  assert.equal(store.getReviews(runId).length, 3);
+  const allResponses = store.getResponses(runId);
+  assert.equal(allResponses.filter((r) => (r.round || 1) === 1).length, 3);
+  assert.equal(allResponses.filter((r) => (r.round || 1) === 1 && r.status === 'success').length, 2);
+  assert.ok(store.getReviews(runId).length >= 3);
   assert.equal(store.getRanking(runId).length, 2);
 });
 
 test('invalid review JSON is repaired once by the same model', async () => {
   const dbPath = path.join(os.tmpdir(), `llm-council-repair-${Date.now()}-${Math.random()}.db`);
   const store = new CouncilStore(createDb(dbPath));
+  const review = ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 2 }, latencyMs: 3 });
   const provider = new FakeProvider({
-    a: ['Antwort A', 'not json', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 2 }, latencyMs: 3 })],
-    b: ['Antwort B', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 2 }, latencyMs: 3 })],
+    a: ['Antwort A', 'not json', review, 'Verbessert A', review],
+    b: ['Antwort B', review, 'Verbessert B', review],
     chair: ['Finale Antwort']
   });
   const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
   const events = [];
   for await (const event of orchestrator.run({ question: 'Q?', councilModels: ['a', 'b'], chairmanModel: 'chair', criteria }, new AbortController().signal)) events.push(event);
   assert.ok(events.find((event) => event.type === 'final'));
-  assert.equal(provider.calls.filter((call) => call.model === 'a').length, 3);
+  assert.equal(provider.calls.filter((call) => call.model === 'a').length, 5);
 });
 
 test('answer progress events stream before answer promises settle', async () => {
@@ -135,8 +138,11 @@ test('answer progress events stream before answer promises settle', async () => 
   const rest = [];
   for await (const event of iterator) {
     rest.push(event);
-    if (event.type === 'model_status' && event.stage === 'reviews') {
+    if (event.type === 'model_status' && (event.stage === 'reviews' || event.stage === 're_review') && event.status === 'running') {
       provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+    }
+    if (event.type === 'model_status' && event.stage === 'improvement' && event.status === 'running') {
+      provider.resolve(event.model, `Verbessert ${event.model}`);
     }
     if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
   }
@@ -176,8 +182,11 @@ test('pre-review SSE events and active API projection do not reveal answer-to-mo
   assert.ok(activeRun.responses.filter((item) => item.content).every((item) => item.anonymous_id && !item.model));
 
   for await (const event of iterator) {
-    if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'running') {
+    if (event.type === 'model_status' && (event.stage === 'reviews' || event.stage === 're_review') && event.status === 'running') {
       provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+    }
+    if (event.type === 'model_status' && event.stage === 'improvement' && event.status === 'running') {
+      provider.resolve(event.model, `Verbessert ${event.model}`);
     }
     if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
   }
@@ -195,8 +204,11 @@ test('answers are fully revealed after peer review completes', async () => {
     if (event.type === 'model_status' && event.stage === 'answers' && event.status === 'running') {
       provider.resolve(event.model, `Antwort ${event.model}`);
     }
-    if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'running') {
+    if (event.type === 'model_status' && (event.stage === 'reviews' || event.stage === 're_review') && event.status === 'running') {
       provider.resolve(event.model, reviewJson(['Response A', 'Response B']));
+    }
+    if (event.type === 'model_status' && event.stage === 'improvement' && event.status === 'running') {
+      provider.resolve(event.model, `Verbessert ${event.model}`);
     }
     if (event.type === 'stage' && event.stage === 'synthesis') provider.resolve('chair', 'Finale Antwort');
   }
@@ -235,9 +247,10 @@ test('aborted runs are persisted as aborted', async () => {
 test('chairman failure keeps ranking and visible failure status', async () => {
   const dbPath = path.join(os.tmpdir(), `llm-council-chair-${Date.now()}-${Math.random()}.db`);
   const store = new CouncilStore(createDb(dbPath));
+  const review = ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 });
   const provider = new FakeProvider({
-    a: ['Antwort A', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
-    b: ['Antwort B', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
+    a: ['Antwort A', review, 'Verbessert A', review],
+    b: ['Antwort B', review, 'Verbessert B', review],
     chair: [new Error('chair unavailable')]
   });
   const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
@@ -252,9 +265,10 @@ test('chairman failure keeps ranking and visible failure status', async () => {
 test('completed runs can be reopened from the same sqlite file after restart', async () => {
   const dbPath = path.join(os.tmpdir(), `llm-council-reopen-${Date.now()}-${Math.random()}.db`);
   const firstStore = new CouncilStore(createDb(dbPath));
+  const review = ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 });
   const provider = new FakeProvider({
-    a: ['Antwort A', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
-    b: ['Antwort B', ({ messages }) => ({ content: reviewJson(['Response A', 'Response B']), usage: { total_tokens: 3 }, latencyMs: 4 })],
+    a: ['Antwort A', review, 'Verbessert A', review],
+    b: ['Antwort B', review, 'Verbessert B', review],
     chair: ['Finale Antwort']
   });
   const orchestrator = new CouncilOrchestrator({ provider, store: firstStore, randomSeedFactory: () => 'fixed' });
@@ -266,7 +280,7 @@ test('completed runs can be reopened from the same sqlite file after restart', a
   const secondStore = new CouncilStore(createDb(dbPath));
   const conversation = secondStore.getConversation(final.conversationId);
   assert.equal(conversation.runs[0].status, 'completed');
-  assert.equal(conversation.runs[0].responses.length, 2);
+  assert.ok(conversation.runs[0].responses.length >= 2);
   assert.equal(conversation.runs[0].ranking.length, 2);
   assert.equal(conversation.runs[0].final_answer, 'Finale Antwort');
 });

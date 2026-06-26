@@ -144,10 +144,10 @@ export class CouncilStore {
   addResponse(response) {
     const created = now();
     const provider = response.provider || {};
-    this.db.prepare(`INSERT INTO model_responses (id, run_id, model_key, model, provider_id, provider_type, provider_label, provider_base_url, anonymous_id, status, content, error, latency_ms, prompt_tokens, completion_tokens, total_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO model_responses (id, run_id, model_key, model, provider_id, provider_type, provider_label, provider_base_url, anonymous_id, status, content, error, latency_ms, prompt_tokens, completion_tokens, total_tokens, created_at, round) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id('res'), response.runId, response.modelKey ?? response.model, response.model, provider.id ?? null, provider.type ?? null, provider.label ?? null, provider.baseUrl ?? null,
         response.anonymousId ?? null, response.status, response.content ?? null, response.error ?? null,
-        response.latencyMs ?? null, response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null, response.usage?.total_tokens ?? null, created);
+        response.latencyMs ?? null, response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null, response.usage?.total_tokens ?? null, created, response.round ?? 1);
   }
 
   setAnonymousId(runId, modelKey, anonymousId) {
@@ -157,10 +157,10 @@ export class CouncilStore {
   addReview(review) {
     const created = now();
     const provider = review.provider || {};
-    this.db.prepare(`INSERT INTO reviews (id, run_id, reviewer_key, reviewer_model, provider_id, provider_type, provider_label, provider_base_url, status, review_json, error, latency_ms, prompt_tokens, completion_tokens, total_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO reviews (id, run_id, reviewer_key, reviewer_model, provider_id, provider_type, provider_label, provider_base_url, status, review_json, error, latency_ms, prompt_tokens, completion_tokens, total_tokens, created_at, round) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id('rev'), review.runId, review.reviewerKey ?? review.reviewerModel, review.reviewerModel, provider.id ?? null, provider.type ?? null, provider.label ?? null, provider.baseUrl ?? null,
         review.status, review.review ? JSON.stringify(review.review) : null, review.error ?? null,
-        review.latencyMs ?? null, review.usage?.prompt_tokens ?? null, review.usage?.completion_tokens ?? null, review.usage?.total_tokens ?? null, created);
+        review.latencyMs ?? null, review.usage?.prompt_tokens ?? null, review.usage?.completion_tokens ?? null, review.usage?.total_tokens ?? null, created, review.round ?? 1);
   }
 
   saveRanking(runId, ranking) {
@@ -211,6 +211,19 @@ export class CouncilStore {
   getContext(conversationId, limit = 6) {
     return this.db.prepare('SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?').all(conversationId, limit).reverse();
   }
+
+  deleteConversation(conversationId) {
+    const runIds = this.db.prepare('SELECT id FROM runs WHERE conversation_id = ?').all(conversationId).map((r) => r.id);
+    for (const runId of runIds) {
+      this.db.prepare('DELETE FROM model_responses WHERE run_id = ?').run(runId);
+      this.db.prepare('DELETE FROM reviews WHERE run_id = ?').run(runId);
+      this.db.prepare('DELETE FROM rankings WHERE run_id = ?').run(runId);
+      this.db.prepare('DELETE FROM errors WHERE run_id = ?').run(runId);
+    }
+    this.db.prepare('DELETE FROM runs WHERE conversation_id = ?').run(conversationId);
+    this.db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(conversationId);
+    this.db.prepare('DELETE FROM conversations WHERE id = ?').run(conversationId);
+  }
 }
 
 function normalizeRun(row) {
@@ -230,6 +243,8 @@ function migrate(db) {
   addColumn(db, 'reviews', 'provider_type TEXT');
   addColumn(db, 'reviews', 'provider_label TEXT');
   addColumn(db, 'reviews', 'provider_base_url TEXT');
+  addColumn(db, 'model_responses', 'round INTEGER DEFAULT 1');
+  addColumn(db, 'reviews', 'round INTEGER DEFAULT 1');
   db.exec(`
     UPDATE model_responses SET model_key = model WHERE model_key IS NULL;
     UPDATE reviews SET reviewer_key = reviewer_model WHERE reviewer_key IS NULL;

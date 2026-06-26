@@ -49,17 +49,50 @@ export class CouncilOrchestrator {
       this.store.markRunRevealed(run.id);
       yield emit('answers_revealed', { responses: answers.results.map((item) => revealResponse(item, anonymous)) });
 
+      // Improvement round
+      this.store.updateRun(run.id, { status: 'running', stage: 'improvement' });
+      yield emit('stage', { stage: 'improvement' });
+      const improvements = yield* this.collectImprovements(run.id, input, anonymous, validReviews, signal, emit);
+      const improvedSuccesses = improvements.results.filter((item) => item.status === 'success');
+
+      let chairmanAnswers = successes;
+      let chairmanReviews = validReviews;
+      let chairmanRanking = ranking;
+
+      if (improvedSuccesses.length >= 2) {
+        const improvedAnonymous = anonymizeResponses(improvedSuccesses, this.randomSeedFactory(run.id + '-r2'));
+        for (const item of improvedAnonymous) this.store.setAnonymousId(run.id, item.modelKey, item.anonymousId);
+        yield emit('improvements_complete', { responses: improvedAnonymous.map(stripPreReviewMapping) });
+
+        // Re-review
+        this.store.updateRun(run.id, { status: 'running', stage: 're_review' });
+        yield emit('stage', { stage: 're_review' });
+        const reReviews = yield* this.collectReviews(run.id, input, improvedAnonymous, signal, emit, 2);
+        const validReReviews = reReviews.results.filter((item) => item.status === 'success').map((item) => item.review);
+        const reRanking = aggregateReviews(validReReviews, improvedAnonymous, input.criteria);
+        this.store.saveRanking(run.id, reRanking);
+        yield emit('re_ranking', { ranking: reRanking.map(redactRankingModel) });
+        yield emit('improvements_revealed', { responses: improvements.results.map((item) => revealResponse(item, improvedAnonymous)) });
+
+        chairmanAnswers = improvedSuccesses;
+        chairmanReviews = validReReviews;
+        chairmanRanking = reRanking;
+      } else {
+        yield emit('improvements_complete', { responses: [] });
+      }
+
       this.store.updateRun(run.id, { status: 'running', stage: 'synthesis' });
       yield emit('stage', { stage: 'synthesis' });
-      const chairman = await this.runChairman(run.id, input, successes, validReviews, ranking, signal);
+      const chairman = await this.runChairman(run.id, input, chairmanAnswers, chairmanReviews, chairmanRanking, signal);
+      const allResults = [...answers.results, ...reviews.results, ...improvements.results, ...(improvedSuccesses.length >= 2 ? [] : [])];
       if (chairman.status === 'success') {
         this.store.addMessage(conversation.id, 'assistant', chairman.content);
-        const summary = summarizeRun(started, answers.results, reviews.results, chairman);
+        const summary = summarizeRun(started, allResults, [], chairman);
         this.store.updateRun(run.id, { status: 'completed', stage: 'complete', summary, final_answer: chairman.content, completed_at: now() });
         yield emit('final', { finalAnswer: chairman.content, summary });
       } else {
         this.store.addError(run.id, 'chairman', chairman.error);
-        const summary = summarizeRun(started, answers.results, reviews.results, chairman);
+        const summary = summarizeRun(started, allResults, [], chairman);
         this.store.updateRun(run.id, { status: 'chairman_failed', stage: 'complete', summary, chairman_error: chairman.error, completed_at: now() });
         yield emit('chairman_failed', { error: chairman.error, summary });
       }
@@ -105,29 +138,68 @@ export class CouncilOrchestrator {
     return { results };
   }
 
-  async *collectReviews(runId, input, anonymous, signal, emit) {
+  async *collectImprovements(runId, input, anonymous, validReviews, signal, emit) {
     const queue = new AsyncEventQueue();
+    const results = new Array(input.councilModels.length);
+    const tasks = input.councilModels.map(async (modelRef, index) => {
+      const model = publicModelName(modelRef);
+      const key = modelKey(modelRef);
+      const original = anonymous.find((item) => item.modelKey === key);
+      if (!original) { results[index] = { model, status: 'failed', error: 'Originalantwort nicht gefunden.' }; return results[index]; }
+      const feedback = gatherFeedbackForModel(original.anonymousId, validReviews);
+      queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'improvement', status: 'running' }));
+      try {
+        const result = await this.provider.chat({
+          model: rawModelName(modelRef),
+          provider: modelRef.provider,
+          signal,
+          messages: buildImprovementMessages(input.question, original.content, feedback)
+        });
+        const item = { model, modelKey: key, provider: publicProvider(modelRef), status: 'success', content: result.content, latencyMs: result.latencyMs, usage: result.usage };
+        this.store.addResponse({ runId, ...item, round: 2 });
+        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'improvement', status: 'success', response: publicResponseStatus(item) }));
+        results[index] = item;
+        return item;
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        const item = { model, modelKey: key, provider: publicProvider(modelRef), status: 'failed', error: safeMessage(error) };
+        this.store.addResponse({ runId, ...item, round: 2 });
+        this.store.addError(runId, `improvement:${model}`, item.error);
+        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'improvement', status: 'failed', error: item.error }));
+        results[index] = item;
+        return item;
+      }
+    });
+    closeQueueWhenDone(queue, tasks);
+    for await (const event of queue) yield event;
+    await throwIfRejected(tasks);
+    return { results };
+  }
+
+  async *collectReviews(runId, input, anonymous, signal, emit, round = 1) {
+    const queue = new AsyncEventQueue();
+    const stageName = round === 1 ? 'reviews' : 're_review';
     const anonymousIds = anonymous.map((item) => item.anonymousId);
     const criteriaIds = input.criteria.map((item) => item.id);
     const results = new Array(input.councilModels.length);
     const tasks = input.councilModels.map(async (modelRef, index) => {
       const model = publicModelName(modelRef);
-      queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'reviews', status: 'running' }));
+      queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: stageName, status: 'running' }));
       const prompt = buildReviewPrompt(input.question, anonymous, input.criteria);
       try {
         const first = await this.provider.chat({ model: rawModelName(modelRef), provider: modelRef.provider, signal, responseFormatJson: true, messages: [{ role: 'system', content: reviewSystemPrompt(input.criteria) }, { role: 'user', content: prompt }] });
         const parsed = await this.parseOrRepairReview(modelRef, first.content, first.usage, first.latencyMs, anonymousIds, criteriaIds, input.criteria, signal);
         const item = { reviewerModel: model, reviewerKey: modelKey(modelRef), provider: publicProvider(modelRef), status: 'success', review: parsed.review, latencyMs: parsed.latencyMs, usage: mergeUsage(first.usage, parsed.repairUsage) };
-        this.store.addReview({ runId, ...item });
-        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'reviews', status: 'success', review: item.review }));
+        this.store.addReview({ runId, ...item, round });
+        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: stageName, status: 'success', review: item.review }));
         results[index] = item;
         return item;
       } catch (error) {
         if (signal?.aborted) throw error;
         const item = { reviewerModel: model, reviewerKey: modelKey(modelRef), provider: publicProvider(modelRef), status: 'failed', error: safeMessage(error) };
-        this.store.addReview({ runId, ...item });
+        this.store.addReview({ runId, ...item, round });
         this.store.addError(runId, `review:${model}`, item.error);
-        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: 'reviews', status: 'failed', error: item.error }));
+        queue.push(emit('model_status', { model, provider: publicProvider(modelRef), stage: stageName, status: 'failed', error: item.error }));
         results[index] = item;
         return item;
       }
@@ -166,7 +238,7 @@ export class CouncilOrchestrator {
         provider: input.chairmanModel.provider,
         signal,
         messages: [
-          { role: 'system', content: 'Du bist Chairman eines LLM-Councils. Schreibe eine eigenständige, transparente finale Antwort. Berücksichtige Konsens, Konflikte und Unsicherheiten.' },
+          { role: 'system', content: 'Du bist Chairman eines LLM-Councils. Deine Aufgabe: (1) Identifiziere Konsenspunkte über alle Antworten. (2) Löse Konflikte und Widersprüche mit Begründung. (3) Fülle Lücken, die einzelne Antworten übersehen haben. (4) Schreibe eine finale Antwort mit Quellenattribution (z.B. "Laut Modell X..."). Strukturiere deine Antwort klar mit Überschriften.' },
           { role: 'user', content: buildChairmanPrompt(input.question, answers, reviews, ranking) }
         ]
       });
@@ -175,6 +247,25 @@ export class CouncilOrchestrator {
       return { status: 'failed', model: publicModelName(input.chairmanModel), provider: publicProvider(input.chairmanModel), error: safeMessage(error) };
     }
   }
+}
+
+function gatherFeedbackForModel(anonymousId, validReviews) {
+  return validReviews.map((review) => {
+    const entry = review.responses?.find((r) => r.responseId === anonymousId);
+    if (!entry) return null;
+    return { scores: entry.scores, rationale: entry.rationale, strengths: entry.strengths, weaknesses: entry.weaknesses };
+  }).filter(Boolean);
+}
+
+function buildImprovementMessages(question, originalAnswer, feedback) {
+  const feedbackText = feedback.map((f, i) => {
+    const scores = Object.entries(f.scores).map(([k, v]) => `${k}: ${v}/10`).join(', ');
+    return `Reviewer ${i + 1}: ${scores}\nBegründung: ${f.rationale}\nStärken: ${f.strengths.join('; ')}\nSchwächen: ${f.weaknesses.join('; ')}`;
+  }).join('\n\n');
+  return [
+    { role: 'system', content: 'Du erhältst deine ursprüngliche Antwort und Peer-Feedback. Überarbeite deine Antwort: Behebe die genannten Schwächen, behalte die Stärken. Sei präzise und strukturiert.' },
+    { role: 'user', content: `Frage: ${question}\n\nDeine ursprüngliche Antwort:\n${originalAnswer}\n\nPeer-Feedback:\n${feedbackText}\n\nSchreibe jetzt deine verbesserte Antwort.` }
+  ];
 }
 
 function buildAnswerMessages(question, context) {
@@ -186,7 +277,7 @@ function buildAnswerMessages(question, context) {
 }
 
 function reviewSystemPrompt(criteria) {
-  return `Du bewertest anonymisierte Antworten. Gib ausschließlich valides JSON zurück. Scores sind ganze Zahlen von 1 bis 10 für: ${criteria.map((c) => c.id).join(', ')}.`;
+  return `Du bewertest anonymisierte Antworten. Gib ausschließlich valides JSON zurück. Scores sind ganze Zahlen von 1 bis 10 für: ${criteria.map((c) => c.id).join(', ')}. Füge für jede Antwort ein Feld "detailed_analysis" hinzu – eine freie Textanalyse der Qualität (2-4 Sätze).`;
 }
 
 function buildReviewPrompt(question, anonymous, criteria) {
@@ -195,12 +286,42 @@ function buildReviewPrompt(question, anonymous, criteria) {
     `Kriterien:\n${criteria.map((c) => `${c.id} (${c.label}, Gewicht ${c.weight})`).join(', ')}`,
     'Bewerte jede Antwort ohne Kenntnis der Modelle.',
     ...anonymous.map((item) => `\n${item.anonymousId}:\n${item.content}`),
-    'JSON-Schema exakt: {"responses":[{"responseId":"Response A","scores":{"correctness":1,"depth":1,"usefulness":1},"rationale":"kurz","strengths":["..."],"weaknesses":["..."]}],"ranking":["Response A","Response B"]}'
+    'JSON-Schema exakt: {"responses":[{"responseId":"Response A","scores":{"correctness":1,"depth":1,"usefulness":1},"rationale":"kurz","strengths":["..."],"weaknesses":["..."],"detailed_analysis":"Freitextanalyse der Qualität"}],"ranking":["Response A","Response B"]}'
   ].join('\n\n');
 }
 
 function buildChairmanPrompt(question, answers, reviews, ranking) {
-  return JSON.stringify({ question, answers: answers.map(({ model, provider, content }) => ({ model, provider, content })), reviews, ranking }, null, 2);
+  const rankingText = ranking.map((r) => `${r.rank}. ${r.model} (Score: ${r.weightedScore})`).join('\n');
+  const answersText = answers.map((a) => `### ${a.model}\n${a.content}`).join('\n\n');
+  const reviewSummary = summarizeReviewsForChairman(reviews, ranking);
+  return [
+    `## Originalfrage\n${question}`,
+    `## Rangliste\n${rankingText}`,
+    `## Modellantworten\n${answersText}`,
+    `## Review-Zusammenfassung\n${reviewSummary}`
+  ].join('\n\n');
+}
+
+function summarizeReviewsForChairman(reviews, ranking) {
+  if (!reviews.length) return 'Keine Reviews verfügbar.';
+  return ranking.map((item) => {
+    const avgText = Object.entries(item.averages || {}).map(([k, v]) => `${k}: ${v}`).join(', ');
+    const allStrengths = [];
+    const allWeaknesses = [];
+    const analyses = [];
+    for (const review of reviews) {
+      const entry = review.responses?.find((r) => r.responseId === item.responseId);
+      if (!entry) continue;
+      if (entry.strengths) allStrengths.push(...entry.strengths);
+      if (entry.weaknesses) allWeaknesses.push(...entry.weaknesses);
+      if (entry.detailed_analysis) analyses.push(entry.detailed_analysis);
+    }
+    const parts = [`**${item.responseId} (${item.model})** — Scores: ${avgText}`];
+    if (allStrengths.length) parts.push(`Stärken: ${[...new Set(allStrengths)].join('; ')}`);
+    if (allWeaknesses.length) parts.push(`Schwächen: ${[...new Set(allWeaknesses)].join('; ')}`);
+    if (analyses.length) parts.push(`Analysen: ${analyses.join(' | ')}`);
+    return parts.join('\n');
+  }).join('\n\n');
 }
 
 function summarizeRun(started, answerResults, reviewResults, chairman) {

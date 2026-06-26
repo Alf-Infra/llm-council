@@ -185,10 +185,13 @@ function App() {
         <button className="new" onClick={() => { setSelectedConversation(null); setEvents([]); setQuestion(''); }}>Neue Conversation</button>
         <div className="history">
           {conversations.map((item) => (
-            <button className={item.id === selectedConversation ? 'historyItem active' : 'historyItem'} key={item.id} onClick={() => openConversation(item.id)}>
-              <span>{item.title}</span>
-              <small>{statusText[item.latest_status] || item.latest_status || 'bereit'}</small>
-            </button>
+            <div className={item.id === selectedConversation ? 'historyItem active' : 'historyItem'} key={item.id} onClick={() => openConversation(item.id)}>
+              <div className="historyContent">
+                <span>{item.title}</span>
+                <small>{statusText[item.latest_status] || item.latest_status || 'bereit'}</small>
+              </div>
+              <button className="icon deleteConv" onClick={(e) => { e.stopPropagation(); if (confirm('Conversation endgültig löschen?')) { fetch(`/api/conversations/${item.id}`, { method: 'DELETE' }).then(() => { if (selectedConversation === item.id) { setSelectedConversation(null); setEvents([]); } refreshConversations(); }); } }} title="Löschen"><Trash2 size={14} /></button>
+            </div>
           ))}
         </div>
       </aside>
@@ -243,11 +246,14 @@ function App() {
   );
 }
 
+const phaseLabels = { answers: '1 Antworten', reviews: '2 Peer-Review', improvement: '3 Verbesserung', re_review: '4 Re-Review', synthesis: '5 Synthese' };
+const phases = ['answers', 'reviews', 'improvement', 're_review', 'synthesis'];
+
 function RunView({ state }) {
   return (
     <section className="run">
       <div className="phaseStrip">
-        {['answers', 'reviews', 'synthesis'].map((phase) => <div className={state.stage === phase ? 'phase active' : 'phase'} key={phase}>{phase === 'answers' ? '1 Antworten' : phase === 'reviews' ? '2 Peer-Review' : '3 Synthese'}</div>)}
+        {phases.map((phase) => <div className={state.stage === phase ? 'phase active' : 'phase'} key={phase}>{phaseLabels[phase]}</div>)}
       </div>
       {state.summary && <Summary summary={state.summary} />}
       <div className="columns">
@@ -256,7 +262,7 @@ function RunView({ state }) {
           <div className="cards">{state.responses.map((item) => <ResponseCard item={item} key={item.anonymousId || item.model} />)}</div>
         </div>
         <div className="panel">
-          <h2>Rangliste</h2>
+          <h2>Rangliste (Runde 1)</h2>
           <table><tbody>{state.ranking.map((item) => <tr key={item.responseId}><td>{item.rank}</td><td>{item.responseId}<small>{item.model}</small></td><td>{item.weightedScore}</td><td>{item.validVotes} Stimmen</td></tr>)}</tbody></table>
         </div>
       </div>
@@ -264,6 +270,22 @@ function RunView({ state }) {
         <h2>Reviews</h2>
         <div className="reviewGrid">{state.reviews.map((item) => <ReviewCard item={item} key={item.reviewerModel || item.model} />)}</div>
       </div>
+      {state.improvedResponses.length > 0 && <>
+        <div className="columns">
+          <div className="panel">
+            <h2>Verbesserte Antworten</h2>
+            <div className="cards">{state.improvedResponses.map((item) => <ResponseCard item={item} key={item.anonymousId || item.model} />)}</div>
+          </div>
+          <div className="panel">
+            <h2>Rangliste (Runde 2)</h2>
+            <table><tbody>{state.reRanking.map((item) => <tr key={item.responseId}><td>{item.rank}</td><td>{item.responseId}<small>{item.model}</small></td><td>{item.weightedScore}</td><td>{item.validVotes} Stimmen</td></tr>)}</tbody></table>
+          </div>
+        </div>
+        <div className="panel">
+          <h2>Re-Reviews</h2>
+          <div className="reviewGrid">{state.reReviews.map((item) => <ReviewCard item={item} key={item.reviewerModel || item.model} />)}</div>
+        </div>
+      </>}
       <div className="panel final">
         <h2>Finale Antwort</h2>
         {state.finalAnswer ? <ReactMarkdown>{state.finalAnswer}</ReactMarkdown> : state.error ? <div className="error">{state.error}</div> : <p className="muted">Noch keine Synthese.</p>}
@@ -287,7 +309,7 @@ function Summary({ summary }) {
 }
 
 function deriveRunState(events) {
-  const state = { stage: 'answers', responses: [], reviews: [], ranking: [], finalAnswer: '', summary: null, error: '' };
+  const state = { stage: 'answers', responses: [], reviews: [], ranking: [], improvedResponses: [], reReviews: [], reRanking: [], finalAnswer: '', summary: null, error: '' };
   for (const event of events) {
     if (event.stage) state.stage = event.stage;
     if (event.type === 'model_status' && event.stage === 'answers') {
@@ -298,16 +320,35 @@ function deriveRunState(events) {
       ...event.responses.map((item) => ({ status: 'success', ...item })),
       ...state.responses.filter((item) => item.status === 'failed' && item.model)
     ];
-    if (event.review) upsert(state.reviews, { reviewerModel: event.model, status: event.status, review: event.review }, (x) => x.reviewerModel === event.model);
+    if (event.type === 'model_status' && event.stage === 'reviews' && event.review) upsert(state.reviews, { reviewerModel: event.model, status: event.status, review: event.review }, (x) => x.reviewerModel === event.model);
     if (event.type === 'model_status' && event.stage === 'reviews' && event.status === 'failed') upsert(state.reviews, { reviewerModel: event.model, status: 'failed', error: event.error }, (x) => x.reviewerModel === event.model);
-    if (event.ranking) {
-      state.ranking = event.ranking;
-    }
+    if (event.type === 'ranking') state.ranking = event.ranking;
     if (event.type === 'answers_revealed' && event.responses) {
       for (const response of event.responses) {
         const existing = state.responses.find((item) => item.anonymousId === response.anonymousId || item.model === response.model);
         if (existing) Object.assign(existing, response);
         else state.responses.push(response);
+      }
+    }
+    // Improvement round events
+    if (event.type === 'model_status' && event.stage === 'improvement') {
+      const item = event.response || { model: event.model, status: event.status, error: event.error };
+      upsert(state.improvedResponses, item, (x) => x.model === event.model);
+    }
+    if (event.type === 'improvements_complete' && event.responses) {
+      if (event.responses.length) state.improvedResponses = [
+        ...event.responses.map((item) => ({ status: 'success', ...item })),
+        ...state.improvedResponses.filter((item) => item.status === 'failed' && item.model)
+      ];
+    }
+    if (event.type === 'model_status' && event.stage === 're_review' && event.review) upsert(state.reReviews, { reviewerModel: event.model, status: event.status, review: event.review }, (x) => x.reviewerModel === event.model);
+    if (event.type === 'model_status' && event.stage === 're_review' && event.status === 'failed') upsert(state.reReviews, { reviewerModel: event.model, status: 'failed', error: event.error }, (x) => x.reviewerModel === event.model);
+    if (event.type === 're_ranking') state.reRanking = event.ranking;
+    if (event.type === 'improvements_revealed' && event.responses) {
+      for (const response of event.responses) {
+        const existing = state.improvedResponses.find((item) => item.anonymousId === response.anonymousId || item.model === response.model);
+        if (existing) Object.assign(existing, response);
+        else state.improvedResponses.push(response);
       }
     }
     if (event.finalAnswer) state.finalAnswer = event.finalAnswer;
@@ -319,13 +360,22 @@ function deriveRunState(events) {
 
 function historyToEvents(run) {
   const events = [{ type: 'stage', stage: run.stage }];
+  const r1Responses = (run.responses || []).filter((r) => !r.round || r.round === 1);
+  const r2Responses = (run.responses || []).filter((r) => r.round === 2);
+  const r1Reviews = (run.reviews || []).filter((r) => !r.round || r.round === 1);
+  const r2Reviews = (run.reviews || []).filter((r) => r.round === 2);
   if (run.modelStatuses) {
     events.push(...run.modelStatuses.map((r) => ({ type: 'model_status', stage: 'answers', model: r.model, status: r.status, response: { model: r.model, status: r.status, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } }, error: r.error })));
   }
-  events.push({ type: 'answers_complete', responses: (run.responses || []).map((r) => ({ anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens }, model: r.model })) });
-  if (run.reviews) events.push(...run.reviews.map((r) => ({ type: 'model_status', stage: 'reviews', model: r.reviewer_model, status: r.status, review: r.review, error: r.error })));
+  events.push({ type: 'answers_complete', responses: r1Responses.map((r) => ({ anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens }, model: r.model })) });
+  if (r1Reviews.length) events.push(...r1Reviews.map((r) => ({ type: 'model_status', stage: 'reviews', model: r.reviewer_model, status: r.status, review: r.review, error: r.error })));
   if (run.ranking) events.push({ type: 'ranking', ranking: run.ranking });
-  if (run.revealed_at) events.push({ type: 'answers_revealed', responses: (run.responses || []).map((r) => ({ model: r.model, anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } })) });
+  if (run.revealed_at) events.push({ type: 'answers_revealed', responses: r1Responses.map((r) => ({ model: r.model, anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } })) });
+  if (r2Responses.length) {
+    events.push({ type: 'improvements_complete', responses: r2Responses.map((r) => ({ anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens }, model: r.model })) });
+    if (r2Reviews.length) events.push(...r2Reviews.map((r) => ({ type: 'model_status', stage: 're_review', model: r.reviewer_model, status: r.status, review: r.review, error: r.error })));
+    events.push({ type: 'improvements_revealed', responses: r2Responses.map((r) => ({ model: r.model, anonymousId: r.anonymous_id, status: r.status, content: r.content, error: r.error, latencyMs: r.latency_ms, usage: { total_tokens: r.total_tokens } })) });
+  }
   if (run.final_answer) events.push({ type: 'final', finalAnswer: run.final_answer, summary: run.summary });
   if (run.chairman_error) events.push({ type: 'chairman_failed', error: run.chairman_error, summary: run.summary });
   return events;

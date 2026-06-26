@@ -43,6 +43,12 @@ export function createApp(options = {}) {
     if (!conversation) return res.status(404).json({ error: 'Conversation nicht gefunden.' });
     return res.json({ conversation: projectConversationForBrowser(conversation) });
   });
+  app.delete('/api/conversations/:id', (req, res) => {
+    const conversation = store.getConversation(req.params.id);
+    if (!conversation) return res.status(404).json({ error: 'Conversation nicht gefunden.' });
+    store.deleteConversation(req.params.id);
+    return res.json({ ok: true });
+  });
 
   app.post('/api/runs', async (req, res) => {
     const normalized = normalizeRunRequest(req.body, config);
