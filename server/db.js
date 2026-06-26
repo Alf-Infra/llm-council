@@ -144,7 +144,7 @@ export class CouncilStore {
   addResponse(response) {
     const created = now();
     const provider = response.provider || {};
-    this.db.prepare(`INSERT INTO model_responses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO model_responses (id, run_id, model_key, model, provider_id, provider_type, provider_label, provider_base_url, anonymous_id, status, content, error, latency_ms, prompt_tokens, completion_tokens, total_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id('res'), response.runId, response.modelKey ?? response.model, response.model, provider.id ?? null, provider.type ?? null, provider.label ?? null, provider.baseUrl ?? null,
         response.anonymousId ?? null, response.status, response.content ?? null, response.error ?? null,
         response.latencyMs ?? null, response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null, response.usage?.total_tokens ?? null, created);
@@ -157,7 +157,7 @@ export class CouncilStore {
   addReview(review) {
     const created = now();
     const provider = review.provider || {};
-    this.db.prepare(`INSERT INTO reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO reviews (id, run_id, reviewer_key, reviewer_model, provider_id, provider_type, provider_label, provider_base_url, status, review_json, error, latency_ms, prompt_tokens, completion_tokens, total_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id('rev'), review.runId, review.reviewerKey ?? review.reviewerModel, review.reviewerModel, provider.id ?? null, provider.type ?? null, provider.label ?? null, provider.baseUrl ?? null,
         review.status, review.review ? JSON.stringify(review.review) : null, review.error ?? null,
         review.latencyMs ?? null, review.usage?.prompt_tokens ?? null, review.usage?.completion_tokens ?? null, review.usage?.total_tokens ?? null, created);
