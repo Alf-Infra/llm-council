@@ -469,7 +469,7 @@ function App() {
   );
 }
 
-const phaseLabels = { answers: 'Antworten', reviews: 'Peer-Review', improvement: 'Verbesserung', re_review: 'Re-Review', synthesis: 'Synthese' };
+const phaseLabels = { answers: 'Antworten', reviews: 'Peer-Review', improvement: 'Verbesserung', re_review: 'Re-Review', synthesis: 'Endantwort' };
 
 function RunView({ state, mode = 'iterative', onCopyConfig }) {
   const [activeTab, setActiveTab] = useState('synthesis');
@@ -488,7 +488,7 @@ function RunView({ state, mode = 'iterative', onCopyConfig }) {
   }, [completed]);
 
   const tabs = [
-    { id: 'synthesis', label: 'Synthese' },
+    { id: 'synthesis', label: 'Endantwort' },
     { id: 'answers', label: 'Antworten' },
     { id: 'reviews', label: 'Bewertungen' },
     { id: 'run-data', label: 'Laufdaten' }
@@ -521,14 +521,14 @@ function RunView({ state, mode = 'iterative', onCopyConfig }) {
       <ol className="phaseStrip" aria-label="Laufphasen">
         {phases.map((phase, index) => <li className={`${state.stage === phase ? 'phase active' : 'phase'}${index < currentIndex ? ' complete' : ''}`} aria-current={state.stage === phase ? 'step' : undefined} key={phase}><span className="srOnly">{index < currentIndex ? 'Abgeschlossen: ' : state.stage === phase ? 'Aktuell: ' : 'Ausstehend: '}</span>{index + 1} {phaseLabels[phase]}</li>)}
       </ol>
-      {completed && <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="run-complete-status">Council-Lauf abgeschlossen. Die finale Phase ist Synthese.</p>}
-      {!hasArtifacts ? <div className="emptyWorkspace"><h2>Bereit für eine gemeinsame Analyse</h2><p>Konfiguriere mindestens zwei Council-Modelle und starte eine Frage. Antworten, Bewertungen und Synthese erscheinen kompakt in getrennten Ansichten.</p></div> : <>
+      {completed && <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="run-complete-status">Council-Lauf abgeschlossen. Die finale Phase ist Endantwort.</p>}
+      {!hasArtifacts ? <div className="emptyWorkspace"><h2>Bereit für eine gemeinsame Analyse</h2><p>Konfiguriere mindestens zwei Council-Modelle und starte eine Frage. Antworten, Bewertungen und Endantwort erscheinen kompakt in getrennten Ansichten.</p></div> : <>
         <div className="resultTabs" role="tablist" aria-label="Ergebnisansichten">
           {tabs.map((tab, index) => <button key={tab.id} ref={(node) => { tabRefs.current[index] = node; }} id={`tab-${tab.id}`} role="tab" aria-selected={activeTab === tab.id} aria-controls={`panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} onKeyDown={(event) => onTabKeyDown(event, index)} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
         </div>
         <section id="panel-synthesis" role="tabpanel" aria-labelledby="tab-synthesis" hidden={activeTab !== 'synthesis'} className="resultPanel final">
-          <p className="eyebrow">Chairman-Ergebnis</p><h2>Synthese</h2>
-          {state.finalAnswer ? <SafeMarkdown>{state.finalAnswer}</SafeMarkdown> : state.error ? <div className="error" role="alert">{state.error}</div> : <p className="muted">Noch keine Synthese.</p>}
+          <p className="eyebrow">Chairman-Ergebnis</p><h2>Endantwort</h2>
+          {state.finalAnswer ? <SafeMarkdown>{state.finalAnswer}</SafeMarkdown> : state.error ? <div className="error" role="alert">{state.error}</div> : <p className="muted">Noch keine Endantwort.</p>}
         </section>
         <section id="panel-answers" role="tabpanel" aria-labelledby="tab-answers" hidden={activeTab !== 'answers'} className="resultPanel">
           <div className="sectionHeading"><div><p className="eyebrow">Quellen</p><h2>Einzelantworten</h2></div><span>{selectedAnswers.length}/2 für Vergleich gewählt</span></div>

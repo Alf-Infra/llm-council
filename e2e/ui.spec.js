@@ -19,7 +19,7 @@ const completedRun = {
   ],
   reviews: [{ reviewer_model: 'beta/model', status: 'success', review: { responses: [{ responseId: 'Response A', scores: { correctness: 9, depth: 8, utility: 9 }, rationale: 'Sehr schlüssig.', strengths: ['Präzise'], weaknesses: ['Knapp'] }], ranking: ['Response A', 'Response B'] } }],
   ranking: [{ rank: 1, responseId: 'Response A', model: 'alpha/model', weightedScore: 9, validVotes: 2 }, { rank: 2, responseId: 'Response B', model: 'beta/model', weightedScore: 8, validVotes: 2 }],
-  final_answer: '# Synthese', summary: { durationMs: 100, modelCalls: 3, successfulCalls: 3, failedCalls: 0, tokenTotals: { total: 20 } }
+  final_answer: '# Endantwort', summary: { durationMs: 100, modelCalls: 3, successfulCalls: 3, failedCalls: 0, tokenTotals: { total: 20 } }
 };
 
 const catalogModels = [
@@ -124,7 +124,7 @@ test('Conversation-History ist vollständig per Tastatur bedienbar', async ({ pa
   await page.keyboard.press('Tab'); // history entry
   await expect(page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.getByText('Synthese', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('Endantwort', { exact: true }).last()).toBeVisible();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: /Conversation.*löschen/ })).toBeFocused();
 });
@@ -132,7 +132,7 @@ test('Conversation-History ist vollständig per Tastatur bedienbar', async ({ pa
 test('Wiederöffnung setzt Endphase und Export auf den neuesten Lauf', async ({ page }) => {
   await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
   await expect(page.getByRole('link', { name: /Export/ })).toHaveAttribute('href', '/api/runs/run-new/export.md');
-  await expect(page.locator('[aria-current="step"]')).toContainText('5 Synthese');
+  await expect(page.locator('[aria-current="step"]')).toContainText('5 Endantwort');
   await expect(page.locator('h1')).toHaveCount(1);
 });
 
@@ -141,7 +141,7 @@ test('Neue Conversation entfernt alten Run-, Export- und Ergebniszustand', async
   await expect(page.getByRole('link', { name: /Export/ })).toBeVisible();
   await page.getByRole('button', { name: 'Neue Conversation' }).click();
   await expect(page.getByRole('link', { name: /Export/ })).toHaveCount(0);
-  await expect(page.locator('.final').getByText('Synthese', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.final').getByText('Endantwort', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Frage an das Council')).toHaveValue('');
 });
 
@@ -168,7 +168,7 @@ test('Live-Regionen melden Phasen-, Council-, Modell- und Abschlussstatus geziel
   const phaseStatus = page.getByTestId('phase-live-status');
   await expect(phaseStatus).toHaveAttribute('role', 'status');
   await expect(phaseStatus).toHaveAttribute('aria-live', 'polite');
-  await expect(phaseStatus).toContainText('Aktuelle Phase: 5 Synthese');
+  await expect(phaseStatus).toContainText('Aktuelle Phase: 5 Endantwort');
 
   const councilStatus = page.getByTestId('council-live-status');
   await expect(councilStatus).toHaveAttribute('aria-atomic', 'true');
@@ -184,11 +184,11 @@ test('Live-Regionen melden Phasen-, Council-, Modell- und Abschlussstatus geziel
   await expect(completionStatus).toContainText('Council-Lauf abgeschlossen');
 });
 
-test('Synthese ist aktiv und Ergebnis-Tabs folgen dem Tastaturmuster', async ({ page }) => {
+test('Endantwort ist aktiv und Ergebnis-Tabs folgen dem Tastaturmuster', async ({ page }) => {
   await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
-  const synthesis = page.getByRole('tab', { name: 'Synthese' });
+  const synthesis = page.getByRole('tab', { name: 'Endantwort' });
   await expect(synthesis).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('tabpanel', { name: 'Synthese' })).toBeVisible();
+  await expect(page.getByRole('tabpanel', { name: 'Endantwort' })).toBeVisible();
   await synthesis.focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: 'Antworten' })).toHaveAttribute('aria-selected', 'true');
@@ -354,7 +354,7 @@ test('mobile Vergleichsansicht stapelt und langer Lauf bleibt kompakt', async ({
   const cards = page.getByTestId('answer-comparison').locator('article');
   const boxes = await Promise.all([cards.nth(0).boundingBox(), cards.nth(1).boundingBox()]);
   expect(boxes[1].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 2);
-  await page.getByRole('tab', { name: 'Synthese' }).click();
+  await page.getByRole('tab', { name: 'Endantwort' }).click();
   const height = await page.evaluate(() => document.documentElement.scrollHeight);
   expect(height).toBeLessThan(5000);
 });

@@ -136,6 +136,96 @@ test('standard mode executes three phases while legacy missing mode remains iter
   assert.deepEqual(store.getResponses(final.runId).map((item) => item.round), [1, 1]);
 });
 
+test('chairman receives a direct, anonymous end-answer task with the standard final round', async () => {
+  const dbPath = path.join(os.tmpdir(), `llm-council-chair-prompt-standard-${Date.now()}-${Math.random()}.db`);
+  const store = new CouncilStore(createDb(dbPath));
+  const ids = ['Response A', 'Response B'];
+  const structuredReview = JSON.stringify({
+    responses: ids.map((responseId, index) => ({
+      responseId,
+      scores: { correctness: 9 - index, depth: 8 - index, usefulness: 7 - index },
+      rationale: `Begründung ${index + 1}`,
+      strengths: [`Stärke ${index + 1}`],
+      weaknesses: [`Schwäche ${index + 1}`],
+      detailed_analysis: `Detailanalyse ${index + 1}`
+    })),
+    ranking: ids
+  });
+  const provider = new FakeProvider({
+    'vendor/alpha-model': ['Ursprünglicher Inhalt Alpha', structuredReview],
+    'vendor/beta-model': ['Ursprünglicher Inhalt Beta', structuredReview],
+    'vendor/chair-model': ['Direkte Endantwort']
+  });
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
+  for await (const unused of orchestrator.run({
+    question: 'Welche Lösung ist am besten?',
+    councilModels: ['vendor/alpha-model', 'vendor/beta-model'],
+    chairmanModel: 'vendor/chair-model',
+    criteria,
+    mode: 'standard'
+  }, new AbortController().signal)) void unused;
+
+  const chairmanCall = provider.calls.find((call) => call.model === 'vendor/chair-model');
+  assert.ok(chairmanCall);
+  const [system, user] = chairmanCall.messages.map((message) => message.content);
+  assert.match(system, /ursprüngliche Nutzerfrage direkt/);
+  assert.match(system, /eigenständige Endantwort/);
+  assert.doesNotMatch(system, /Laut Modell X|Quellenattribution|Identifiziere Konsenspunkte/);
+  assert.match(user, /ORIGINALFRAGE/);
+  assert.match(user, /INTERNES ARBEITSMATERIAL/);
+  assert.match(user, /ZU ERSTELLENDE ENDANTWORT/);
+  assert.match(user, /Kandidat A/);
+  assert.match(user, /Kandidat B/);
+  assert.match(user, /Ursprünglicher Inhalt Alpha/);
+  assert.match(user, /Ursprünglicher Inhalt Beta/);
+  assert.match(user, /Begründung 1/);
+  assert.match(user, /Stärke 2/);
+  assert.match(user, /Schwäche 1/);
+  assert.match(user, /Detailanalyse 2/);
+  assert.match(user, /1\. Kandidat [AB]/);
+  assert.match(user, /gewichteter Score:/);
+  assert.match(user, /gültige Stimmen:/);
+  assert.doesNotMatch(user, /vendor\/alpha-model|vendor\/beta-model|Response [AB]/);
+});
+
+test('iterative chairman material uses only improved answers, re-reviews and final ranking', async () => {
+  const dbPath = path.join(os.tmpdir(), `llm-council-chair-prompt-iterative-${Date.now()}-${Math.random()}.db`);
+  const store = new CouncilStore(createDb(dbPath));
+  const firstReview = reviewJson(['Response A', 'Response B']);
+  const finalReview = JSON.stringify({
+    responses: ['Response A', 'Response B'].map((responseId, index) => ({
+      responseId,
+      scores: { correctness: 10 - index, depth: 9 - index, usefulness: 8 - index },
+      rationale: `Finalbegründung ${index + 1}`,
+      strengths: ['Finalstärke'],
+      weaknesses: ['Finalschwäche'],
+      detailed_analysis: `Finalanalyse ${index + 1}`
+    })),
+    ranking: ['Response B', 'Response A']
+  });
+  const provider = new FakeProvider({
+    'vendor/alpha-model': ['ALTE ANTWORT ALPHA', firstReview, 'VERBESSERTE ANTWORT ALPHA', finalReview],
+    'vendor/beta-model': ['ALTE ANTWORT BETA', firstReview, 'VERBESSERTE ANTWORT BETA', finalReview],
+    'vendor/chair-model': ['Direkte Endantwort']
+  });
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: (runId) => runId.endsWith('-r2') ? 'round-two' : 'round-one' });
+  for await (const unused of orchestrator.run({
+    question: 'Gib eine Empfehlung.',
+    councilModels: ['vendor/alpha-model', 'vendor/beta-model'],
+    chairmanModel: 'vendor/chair-model',
+    criteria,
+    mode: 'iterative'
+  }, new AbortController().signal)) void unused;
+
+  const chairmanCall = provider.calls.find((call) => call.model === 'vendor/chair-model');
+  const prompt = chairmanCall.messages[1].content;
+  assert.match(prompt, /VERBESSERTE ANTWORT ALPHA/);
+  assert.match(prompt, /VERBESSERTE ANTWORT BETA/);
+  assert.match(prompt, /Finalbegründung/);
+  assert.match(prompt, /Finalanalyse/);
+  assert.doesNotMatch(prompt, /ALTE ANTWORT|begruendung|vendor\/alpha-model|vendor\/beta-model|Response [AB]/);
+});
+
 test('answer progress events stream before answer promises settle', async () => {
   const dbPath = path.join(os.tmpdir(), `llm-council-stream-${Date.now()}-${Math.random()}.db`);
   const store = new CouncilStore(createDb(dbPath));
