@@ -56,3 +56,12 @@
 - Ergebnis: Sicherer dynamischer OpenRouter-Katalog mit Fresh-/Stale-Semantik, katalogvalidierte Presets und 3-/5-Phasenmodi, serverautoritativ kanonisierte Auswahl und Preise, transparente Call-/Kostenprognose, stabile historische Preissnapshots, vollständige Run-Auswahl und Konfigurationsübernahme ohne API-Key. Stale oder kanonisch kollidierende Auswahlen enden vor jeder Seiteneffektgrenze mit klarer 503-/422-Semantik.
 - Tester-Finale: 38 Backendtests und 21 Playwright/Axe-Tests grün; Build, HTTP-Smokes, Portbereinigung, Secret-Lebenszyklus, Run-State und alle Paket-1/2-Grenzen bestätigt.
 - Reviewer-Finale: Gate grün ohne Concerns; V15-002 bis V15-004 und die kanonische Auswahl-Invariante sind geschlossen.
+
+### v1.5.1 (2026-07-15)
+
+- Auftrag: Produktive Darstellung des OpenRouter-Modellkatalogs lesbar und übersichtlich machen; lange Treffer dürfen im schmalen Konfigurationsbereich nicht überlappen.
+- Abgrenzung: Reiner UI-/Accessibility-Fix. Direkter offizieller OpenRouter-Katalog, 15-Minuten-Cache, Safe-Field-Projektion, Validierung und alle übrigen v1.5-Funktionen bleiben unverändert.
+- Codex-Commit: `40da231`.
+- Ergebnis: Selbstständig wachsende, responsive Katalogkarten mit klarer Name-/Slug-/Metadatenhierarchie, beschrifteten Input-/Outputpreisen, verständlichem Leerzustand und eindeutigem „Modell hinzufügen“. Die Trefferliste bleibt in 340-px-Rail und mobilem Drawer intern scrollbar und overflow-frei.
+- Tester-Finale: 38 Backendtests und 22 Playwright/Axe-Tests grün; Bounding-Box-, Overflow-, Keyboard- und Axe-Regressionsprüfung sowie Build, HTTP-Smokes und Portbereinigung bestätigt.
+- Reviewer-Finale: Gate grün ohne Concerns; Diff auf UI/Styles/Test begrenzt, alle v1.5- und Paket-1/2-Grenzen unverändert.

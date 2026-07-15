@@ -1074,3 +1074,64 @@ Verbindlicher Fix:
 Alle übrigen v1.5-Funktionen, 30 Backendtests, 21 Browser/Axe-Tests sowie
 Paket-1/2-, Reveal-, Export-, Secret-, SSE-, Build-, Health- und Port-Grenzen
 müssen grün bleiben.
+
+## Iteration v1.5.1 — Übersichtliche Darstellung des Modellkatalogs
+
+Kevin hat am 2026-07-15 anhand des produktiven v1.5-Stands gemeldet, dass die
+Treffer im Modellkatalog optisch ineinanderlaufen. Im 340 px breiten
+Konfigurationsbereich überlagern sich bei der Suche nach beispielsweise
+`claude` Modellname, vollständiger Slug, Kontext und Preise. Die Funktion ist
+damit nicht zuverlässig lesbar. Behebe gezielt diese Darstellungs- und
+Bedienbarkeitsabweichung; die Katalogquelle und die fachlichen v1.5-Grenzen
+bleiben unverändert.
+
+### Acceptance Criteria
+
+- Jeder Katalogtreffer ist eine klar abgegrenzte, selbstständig in der Höhe
+  wachsende Trefferkarte. Inhalt benachbarter Karten darf sich bei langen oder
+  mehrzeiligen Namen, Slugs, lokalisierten Zahlen und Preisen niemals
+  überdecken.
+- Pro Treffer ist die Informationshierarchie eindeutig: Modellname als
+  Primärzeile, vollständiger OpenRouter-Slug als separat lesbare Sekundärzeile
+  und Metadaten darunter. Kontextfenster sowie Input-/Outputpreis pro 1 Mio.
+  Token werden verständlich beschriftet und nicht als unkommentiertes
+  Zahlenpaar dargestellt. Fehlende Preise bleiben als „nicht verfügbar“
+  erkennbar.
+- Slugs und andere lange untrennbare Werte dürfen innerhalb der Karte
+  umbrechen, ohne horizontalen Overflow oder abgeschnittene fachliche
+  Information. Modellnamen dürfen kontrolliert umbrechen; es gibt feste
+  Innenabstände, Zeilenhöhen und sichtbare Abstände zwischen Treffern.
+- Die Aktion eines Treffers ist klar als „Modell hinzufügen“ erkennbar. Die
+  komplette Interaktion bleibt per Tastatur erreichbar und besitzt einen
+  eindeutigen zugänglichen Namen. Verwende entweder eine semantische Liste mit
+  Schaltflächen oder implementiere das vollständige ARIA-Listbox-Muster;
+  keine widersprüchliche Mischsemantik aus Button und unvollständiger Option.
+- Oberhalb der Ergebnisliste wird bei aktiver Suche die Zahl der sichtbaren
+  Treffer im Verhältnis zum geladenen Katalog angezeigt. Eine Suche ohne
+  Treffer erhält einen verständlichen leeren Zustand. Laden, Fehler,
+  Stale-Cache und Aktualisieren bleiben zugänglich und funktionsfähig.
+- Die Ergebnisliste bleibt höhenbegrenzt und intern scrollbar, ohne Presets
+  oder weitere Konfigurationselemente zu überlagern. Scrollbar, Fokusrahmen,
+  Hover- und Aktivzustand dürfen Text nicht verdecken oder Layoutsprünge
+  erzeugen.
+- Produktionsnahe Browserregressionen prüfen mindestens die Suche `claude`
+  mit mehreren realistisch langen OpenRouter-Fixtures in der 340-px-
+  Desktopleiste und im schmalen Konfigurationsdrawer. Sie belegen per
+  Bounding-Boxes, dass Treffer und deren Textbereiche sich nicht überlappen,
+  sowie keinen horizontalen Dokument- oder Containeroverflow.
+- Eine Keyboard-/Axe-Regression prüft Suche, Ergebnisnavigation und Hinzufügen
+  eines Modells. Bestehende 38 Backendtests und 21 Playwright/Axe-Tests,
+  Katalogcache, direkte OpenRouter-Anbindung, Fresh-/Stale-Semantik,
+  serverseitige Validierung, Presets, Kosten, History, Secret-Grenzen und alle
+  Paket-1/2-Regressionen bleiben grün.
+- Tests verwenden ausschließlich lokale Fixtures. Es werden weder echte
+  kostenpflichtige Modellaufrufe noch Katalogtests gegen den Live-Dienst
+  ausgeführt. Deployment erst nach grünem unabhängigem Tester- und
+  Reviewer-Gate.
+
+### Nicht-Ziele
+
+- Keine Änderung des offiziellen Katalogendpunkts, des 15-Minuten-In-Memory-
+  Caches, der serverseitigen Safe-Field-Projektion oder der Modellvalidierung.
+- Keine neuen Provider, keine Änderung an Council-Orchestrierung, Presets,
+  Preisberechnung, API-Key-Lebenszyklus oder Persistenz.
