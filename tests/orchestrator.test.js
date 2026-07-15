@@ -182,9 +182,9 @@ test('chairman receives a direct, anonymous end-answer task with the standard fi
   assert.match(user, /Stärke 2/);
   assert.match(user, /Schwäche 1/);
   assert.match(user, /Detailanalyse 2/);
-  assert.match(user, /1\. Kandidat [AB]/);
-  assert.match(user, /gewichteter Score:/);
-  assert.match(user, /gültige Stimmen:/);
+  assert.match(user, /Kandidat [AB] → Kandidat [AB]/);
+  assert.match(user, /ausschließlich interner Qualitätskontext/);
+  assert.doesNotMatch(user, /gewichteter Score|gültige Stimmen|aggregierte Kriterien|correctness|depth|usefulness|\b[12]\. Kandidat/);
   assert.doesNotMatch(user, /vendor\/alpha-model|vendor\/beta-model|Response [AB]/);
 });
 
@@ -223,7 +223,8 @@ test('iterative chairman material uses only improved answers, re-reviews and fin
   assert.match(prompt, /VERBESSERTE ANTWORT BETA/);
   assert.match(prompt, /Finalbegründung/);
   assert.match(prompt, /Finalanalyse/);
-  assert.doesNotMatch(prompt, /ALTE ANTWORT|begruendung|vendor\/alpha-model|vendor\/beta-model|Response [AB]/);
+  assert.match(prompt, /Kandidat [AB] → Kandidat [AB]/);
+  assert.doesNotMatch(prompt, /ALTE ANTWORT|begruendung|vendor\/alpha-model|vendor\/beta-model|Response [AB]|gewichteter Score|gültige Stimmen|aggregierte Kriterien|correctness|depth|usefulness|\b[12]\. Kandidat/);
 });
 
 test('answer progress events stream before answer promises settle', async () => {
