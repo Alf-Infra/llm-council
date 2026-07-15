@@ -5,7 +5,7 @@ export default defineConfig({
   fullyParallel: false,
   use: { baseURL: 'http://127.0.0.1:4173', trace: 'retain-on-failure' },
   webServer: {
-    command: 'npm run dev -- --port 4173',
+    command: 'npm run build && PORT=4173 npm start',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: false
   }

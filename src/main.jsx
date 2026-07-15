@@ -33,6 +33,7 @@ function App() {
   const [error, setError] = useState('');
   const [bootError, setBootError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [desktopHistoryOpen, setDesktopHistoryOpen] = useState(true);
   const [configOpen, setConfigOpen] = useState(true);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const historyTriggerRef = useRef(null);
@@ -41,6 +42,9 @@ function App() {
   const configDrawerRef = useRef(null);
   const historyCloseRef = useRef(null);
   const configCloseRef = useRef(null);
+  const skipLinkRef = useRef(null);
+  const mobileBarRef = useRef(null);
+  const workspaceRef = useRef(null);
   const abortRef = useRef(null);
   const running = Boolean(abortRef.current);
 
@@ -70,6 +74,27 @@ function App() {
   const historyModalOpen = historyOpen && viewportWidth <= 760;
   const configModalOpen = configOpen && viewportWidth <= 1100;
   const modalOpen = historyModalOpen || configModalOpen;
+
+  useEffect(() => {
+    const isolated = historyModalOpen
+      ? [skipLinkRef.current, mobileBarRef.current, workspaceRef.current, configDrawerRef.current]
+      : configModalOpen
+        ? [skipLinkRef.current, mobileBarRef.current, workspaceRef.current, historyDrawerRef.current]
+        : [];
+    const nodes = [skipLinkRef.current, mobileBarRef.current, workspaceRef.current, historyDrawerRef.current, configDrawerRef.current].filter(Boolean);
+    for (const node of nodes) {
+      const shouldIsolate = isolated.includes(node);
+      node.inert = shouldIsolate;
+      if (shouldIsolate) node.setAttribute('inert', '');
+      else node.removeAttribute('inert');
+    }
+    return () => {
+      for (const node of nodes) {
+        node.inert = false;
+        node.removeAttribute('inert');
+      }
+    };
+  }, [historyModalOpen, configModalOpen]);
 
   useEffect(() => {
     if (!modalOpen) return undefined;
@@ -289,14 +314,14 @@ function App() {
   if (!config) return <main className="boot" id="main-content"><h1>LLM Council</h1>{bootError ? <><div className="error" role="alert">{bootError}</div><button onClick={loadInitial}>Erneut versuchen</button></> : <p role="status">App wird geladen…</p>}</main>;
 
   return (
-    <><a className="skipLink" href="#main-content" inert={modalOpen ? '' : undefined}>Zum Hauptinhalt springen</a><div className={`shell ${configOpen ? '' : 'configCollapsed'}`}>
-      <header className="mobileBar" inert={modalOpen ? '' : undefined}>
+    <><a ref={skipLinkRef} className="skipLink" href="#main-content">Zum Hauptinhalt springen</a><div className={`shell ${configOpen ? '' : 'configCollapsed'} ${desktopHistoryOpen ? '' : 'historyCollapsed'}`}>
+      <header ref={mobileBarRef} className="mobileBar">
         <button className="icon" aria-label="Historie öffnen" aria-expanded={historyOpen} onClick={(event) => openDrawer('history', event.currentTarget)}><Menu aria-hidden="true" /></button>
         <strong>LLM Council</strong>
         <button data-testid="mobile-config-trigger" className="icon" aria-label="Konfiguration öffnen" aria-expanded={configOpen} onClick={(event) => openDrawer('config', event.currentTarget)}><PanelRightOpen aria-hidden="true" /></button>
       </header>
       {modalOpen && <div className="drawerBackdrop" aria-hidden="true" onClick={() => closeDrawer(historyModalOpen ? 'history' : 'config')} />}
-      <aside ref={historyDrawerRef} className={`sidebar ${historyOpen ? 'drawerOpen' : ''}`} aria-label="Conversation-Historie" role={historyModalOpen ? 'dialog' : undefined} aria-modal={historyModalOpen ? 'true' : undefined} inert={(viewportWidth <= 760 && !historyOpen) || configModalOpen ? '' : undefined}>
+      <aside ref={historyDrawerRef} className={`sidebar ${historyOpen ? 'drawerOpen' : ''}`} aria-label="Conversation-Historie" role={historyModalOpen ? 'dialog' : undefined} aria-modal={historyModalOpen ? 'true' : undefined} inert={(viewportWidth <= 760 && !historyOpen) || (viewportWidth > 1100 && !desktopHistoryOpen) ? true : undefined}>
         <div className="asideHeading"><div className="brand" aria-hidden="true">LLM Council</div><button ref={historyCloseRef} className="icon drawerClose" aria-label="Historie schließen" onClick={() => closeDrawer('history')}><X aria-hidden="true" /></button></div>
         <button className="new" onClick={newConversation}>Neue Conversation</button>
         <div className="history">
@@ -312,8 +337,8 @@ function App() {
         </div>
       </aside>
 
-      <main className="workspace" id="main-content" inert={modalOpen ? '' : undefined}>
-        <div className="workspaceHeading"><div><p className="eyebrow">Council Analysis Workspace</p><h1>LLM Council Analyse</h1></div><button className="configToggle" aria-expanded={configOpen} onClick={(event) => { configTriggerRef.current = event.currentTarget; setConfigOpen(!configOpen); }}><PanelRightOpen size={17} aria-hidden="true" /> {configOpen ? 'Konfiguration schließen' : 'Konfiguration öffnen'}</button></div>
+      <main ref={workspaceRef} className="workspace" id="main-content">
+        <div className="workspaceHeading"><div><p className="eyebrow">Council Analysis Workspace</p><h1>LLM Council Analyse</h1></div><div className="headingActions"><button className="historyToggle" aria-expanded={desktopHistoryOpen} onClick={() => setDesktopHistoryOpen((open) => !open)}><Menu size={17} aria-hidden="true" /> {desktopHistoryOpen ? 'Historie schließen' : 'Historie öffnen'}</button><button className="configToggle" aria-expanded={configOpen} onClick={(event) => { configTriggerRef.current = event.currentTarget; setConfigOpen(!configOpen); }}><PanelRightOpen size={17} aria-hidden="true" /> {configOpen ? 'Konfiguration schließen' : 'Konfiguration öffnen'}</button></div></div>
         <section className="composer">
           <label htmlFor="question">Frage an das Council</label>
           <textarea id="question" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Was soll das Council analysieren?" />
@@ -328,7 +353,7 @@ function App() {
         <RunView state={state} runId={currentRunId} />
       </main>
 
-      <aside ref={configDrawerRef} className={`configRail ${configOpen ? 'drawerOpen' : ''}`} aria-label="Laufkonfiguration" role={configModalOpen ? 'dialog' : undefined} aria-modal={configModalOpen ? 'true' : undefined} inert={(viewportWidth <= 1100 && !configOpen) || historyModalOpen ? '' : undefined}>
+      <aside ref={configDrawerRef} className={`configRail ${configOpen ? 'drawerOpen' : ''}`} aria-label="Laufkonfiguration" role={configModalOpen ? 'dialog' : undefined} aria-modal={configModalOpen ? 'true' : undefined} inert={viewportWidth <= 1100 && !configOpen ? true : undefined}>
         <div className="asideHeading"><div><p className="eyebrow">Einstellungen</p><h2>Konfiguration</h2></div><button ref={configCloseRef} className="icon drawerClose" aria-label="Konfiguration schließen" onClick={() => closeDrawer('config')}><X aria-hidden="true" /></button></div>
         <section className="configStack">
           <div className="configSection">

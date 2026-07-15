@@ -219,6 +219,56 @@ test('frischer mobiler Konfigurationsdrawer gibt Backdrop-Fokus an den Header-Au
   await expect(trigger).toBeFocused();
 });
 
+test('Desktop-History gibt beim Einklappen ihre Grid-Breite vollständig frei', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const sidebar = page.locator('aside.sidebar');
+  const toggle = page.getByRole('button', { name: 'Historie schließen' });
+  const widthBefore = await page.locator('main.workspace').evaluate((node) => node.getBoundingClientRect().width);
+  await toggle.click();
+  const reopen = page.getByRole('button', { name: 'Historie öffnen' });
+  await expect(reopen).toBeFocused();
+  await expect(reopen).toHaveAttribute('aria-expanded', 'false');
+  await expect(sidebar).toBeHidden();
+  await expect(sidebar).toHaveAttribute('inert', '');
+  await expect.poll(() => page.locator('main.workspace').evaluate((node) => node.getBoundingClientRect().width)).toBeGreaterThan(widthBefore + 200);
+  await expect(page.getByRole('button', { name: /^Gespeicherte Analyse/ })).toHaveCount(0);
+  await reopen.click();
+  await expect(sidebar).toBeVisible();
+  await expect(sidebar).not.toHaveAttribute('inert', '');
+  await expect(page.getByRole('button', { name: /^Gespeicherte Analyse/ })).toBeEnabled();
+});
+
+test('Mobile Drawer isolieren den Produktions-DOM symmetrisch und entfernen Isolation beim Schließen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 850 });
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('LLM Council Analyse');
+  const background = ['.skipLink', 'header.mobileBar', 'main.workspace'];
+  const assertInert = async (selectors, expected) => {
+    for (const selector of selectors) {
+      const state = await page.locator(selector).evaluate((node) => ({ attribute: node.hasAttribute('inert'), property: node.inert }));
+      expect(state).toEqual({ attribute: expected, property: expected });
+    }
+  };
+
+  const configTrigger = page.getByTestId('mobile-config-trigger');
+  await configTrigger.click();
+  await assertInert([...background, 'aside.sidebar'], true);
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('dialog', { name: 'Laufkonfiguration' }).locator(':focus')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await assertInert(background, false);
+  await expect(configTrigger).toBeFocused();
+
+  const historyTrigger = page.getByRole('button', { name: 'Historie öffnen' });
+  await historyTrigger.click();
+  await assertInert([...background, 'aside.configRail'], true);
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('dialog', { name: 'Conversation-Historie' }).locator(':focus')).toHaveCount(1);
+  await page.locator('.drawerBackdrop').click({ position: { x: 385, y: 400 } });
+  await assertInert(background, false);
+  await expect(historyTrigger).toBeFocused();
+});
+
 test('Markdown-### wahrt genau ein h1 und verletzt die Heading-Reihenfolge nicht', async ({ page }) => {
   await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
   await page.getByRole('tab', { name: 'Antworten' }).click();

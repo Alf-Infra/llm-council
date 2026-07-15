@@ -13,14 +13,18 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 .primary { background:var(--accent); color:#fff; border-color:var(--accent); }
 .shell { min-height:100vh; display:grid; grid-template-columns:248px minmax(0,1fr) 340px; transition:grid-template-columns .2s ease; }
 .shell.configCollapsed { grid-template-columns:248px minmax(0,1fr) 0; }
+.shell.historyCollapsed { grid-template-columns:0 minmax(0,1fr) 340px; }
+.shell.historyCollapsed.configCollapsed { grid-template-columns:0 minmax(0,1fr) 0; }
 .mobileBar { display:none; }
 .sidebar, .configRail { min-width:0; height:100vh; position:sticky; top:0; overflow:auto; }
 .sidebar { background:var(--nav); color:#fff; padding:20px 14px; display:flex; flex-direction:column; gap:18px; }
 .configRail { background:#f8f8f5; border-left:1px solid var(--line); padding:22px 18px; }
 .configCollapsed .configRail { visibility:hidden; overflow:hidden; padding:0; }
+.historyCollapsed .sidebar { visibility:hidden; overflow:hidden; padding:0; }
 .asideHeading, .workspaceHeading, .sectionHeading, .panelHeader { display:flex; justify-content:space-between; align-items:center; gap:14px; }
 .brand { font-size:20px; font-weight:780; letter-spacing:-.02em; }
 .drawerClose { display:none; }
+.headingActions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
 .new { background:#283b37; color:#fff; border-color:#405550; width:100%; }
 .history { display:flex; flex-direction:column; gap:7px; overflow:auto; }
 .historyItem { border:1px solid #354944; border-radius:8px; display:flex; padding:4px; }
@@ -103,6 +107,6 @@ summary { cursor:pointer; font-weight:650; }
 .drawerBackdrop { display:none; }
 .boot { min-height:100vh; display:flex; flex-direction:column; gap:16px; align-items:center; justify-content:center; padding:20px; }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; animation-iteration-count:1!important; } }
-@media (max-width:1100px) { .shell,.shell.configCollapsed { grid-template-columns:220px minmax(0,1fr); } .configRail { position:fixed; z-index:30; right:0; width:min(360px,90vw); transform:translateX(105%); transition:transform .2s ease; visibility:visible!important; padding:22px 18px!important; } .configRail.drawerOpen { transform:none; } .drawerBackdrop { display:block; position:fixed; inset:0; z-index:20; background:#0d17147d; } .drawerClose { display:inline-flex; } }
+@media (max-width:1100px) { .shell,.shell.configCollapsed,.shell.historyCollapsed,.shell.historyCollapsed.configCollapsed { grid-template-columns:220px minmax(0,1fr); } .historyCollapsed .sidebar { visibility:visible; overflow:auto; padding:20px 14px; } .historyToggle { display:none; } .configRail { position:fixed; z-index:30; right:0; width:min(360px,90vw); transform:translateX(105%); transition:transform .2s ease; visibility:visible!important; padding:22px 18px!important; } .configRail.drawerOpen { transform:none; } .drawerBackdrop { display:block; position:fixed; inset:0; z-index:20; background:#0d17147d; } .drawerClose { display:inline-flex; } }
 @media (max-width:760px) { .shell,.shell.configCollapsed { display:block; padding-top:58px; } .mobileBar { display:flex; position:fixed; inset:0 0 auto; z-index:15; height:58px; padding:7px 12px; background:#fff; border-bottom:1px solid var(--line); align-items:center; justify-content:space-between; } .sidebar { position:fixed; z-index:30; left:0; width:min(310px,90vw); transform:translateX(-105%); transition:transform .2s ease; } .sidebar.drawerOpen { transform:none; } .workspace { padding:18px 14px 44px; } .workspaceHeading { top:58px; } .configToggle { display:none; } .phaseStrip { grid-template-columns:1fr; } .phase { text-align:left; } .resultTabs { top:127px; width:100%; } .comparison { grid-template-columns:1fr; } .modelRow { grid-template-columns:1fr 1fr 44px; } .icon,.deleteConv { min-width:44px; min-height:44px; } .deleteConv { opacity:1; } }
 @media (max-width:430px) { .actions>* { flex:1 1 auto; } .resultPanel { padding:16px 12px; } .sectionHeading { align-items:flex-start; flex-direction:column; } th,td { padding:7px 6px; } }
