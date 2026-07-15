@@ -22,6 +22,12 @@ const completedRun = {
   final_answer: '# Synthese', summary: { durationMs: 100, modelCalls: 3, successfulCalls: 3, failedCalls: 0, tokenTotals: { total: 20 } }
 };
 
+const catalogModels = [
+  { id: 'alpha/model', canonicalSlug: 'alpha/model', name: 'Alpha Reasoner', contextLength: 128000, pricing: { prompt: 0.000001, completion: 0.000002, request: 0 } },
+  { id: 'beta/model', canonicalSlug: 'beta/model', name: 'Beta Fast', contextLength: 64000, pricing: { prompt: 0.0000005, completion: 0.000001, request: 0 } },
+  { id: 'chair/model', canonicalSlug: 'chair/model', name: 'Chair Pro', contextLength: 200000, pricing: { prompt: 0.000002, completion: 0.000004, request: 0 } }
+];
+
 async function mockApi(page, { failInitial = false } = {}) {
   let failed = failInitial;
   await page.route('**/api/**', async (route) => {
@@ -31,6 +37,8 @@ async function mockApi(page, { failInitial = false } = {}) {
       return route.fulfill({ status: 500, json: { error: 'kaputt' } });
     }
     if (url.pathname === '/api/config') return route.fulfill({ json: config });
+    if (url.pathname === '/api/models' && route.request().method() === 'GET') return route.fulfill({ json: { models: catalogModels, stale: false, ageMs: 20, presets: [{ id: 'fast', label: 'Schnell', mode: 'standard', council: ['alpha/model', 'beta/model'], chairman: 'chair/model', available: true }] } });
+    if (url.pathname === '/api/models/validate') return route.fulfill({ json: { ok: true, results: catalogModels.map((model) => ({ requestedId: model.id, ok: true, canonicalSlug: model.id })) } });
     if (url.pathname === '/api/conversations') return route.fulfill({ json: { conversations: [{ id: 'conv-1', title: 'Gespeicherte Analyse', latest_status: 'completed' }] } });
     if (url.pathname === '/api/conversations/conv-1') return route.fulfill({ json: { conversation: { id: 'conv-1', runs: [{ ...completedRun, id: 'run-old', started_at: '2026-07-14T12:00:00Z' }, completedRun] } } });
     return route.fulfill({ status: 200, json: { ok: true } });
@@ -49,6 +57,26 @@ test('Modellkennung behält Fokus und vollständigen Wert', async ({ page }) => 
   await input.pressSequentially('/extended', { delay: 5 });
   await expect(input).toBeFocused();
   await expect(input).toHaveValue('alpha/model/extended');
+});
+
+test('Katalogsuche, Preset und flüchtige API-Key-Löschung funktionieren ohne Browser-Storage', async ({ page }) => {
+  await page.getByLabel('Modelle suchen').fill('Beta Fast');
+  const option = page.getByRole('option', { name: /Beta Fast/ });
+  await expect(option).toContainText('beta/model');
+  await page.getByRole('button', { name: /Schnell/ }).click();
+  await expect(page.getByText('5 Basiscalls')).toBeVisible();
+  await page.getByLabel('API-Key').fill('sk-test-never-store');
+  await page.getByRole('button', { name: 'API-Key löschen' }).click();
+  await expect(page.getByLabel('API-Key')).toHaveValue('');
+  const storage = await page.evaluate(async () => ({ local: Object.values(localStorage), session: Object.values(sessionStorage), databases: (await indexedDB.databases()).map((item) => item.name) }));
+  expect(JSON.stringify(storage)).not.toContain('sk-test-never-store');
+});
+
+test('Laufmodus schaltet zugänglich zwischen drei und fünf Phasen', async ({ page }) => {
+  await page.getByLabel('Standard (3 Phasen)').check();
+  await expect(page.getByRole('list', { name: 'Laufphasen' }).getByRole('listitem')).toHaveCount(3);
+  await page.getByLabel('Iterativ (5 Phasen)').check();
+  await expect(page.getByRole('list', { name: 'Laufphasen' }).getByRole('listitem')).toHaveCount(5);
 });
 
 test('Conversation-History ist vollständig per Tastatur bedienbar', async ({ page }) => {

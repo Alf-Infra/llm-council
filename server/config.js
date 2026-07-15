@@ -12,7 +12,7 @@ export function loadRuntimeConfig(env = process.env) {
     apiKey: env.LLM_API_KEY || '',
     requestTimeoutMs: Number.parseInt(env.LLM_REQUEST_TIMEOUT_MS || '120000', 10),
     maxOutputTokens: Number.parseInt(env.LLM_MAX_OUTPUT_TOKENS || '4096', 10),
-    defaults: ['gpt-5.5', 'gpt-5.4', 'claude-sonnet-4-6', 'gemini-3-pro-preview'],
+    defaults: ['openai/gpt-5.5', 'openai/gpt-5.4', 'anthropic/claude-sonnet-4.6', 'google/gemini-3.1-pro-preview'],
     criteria: [
       { id: 'correctness', label: 'Korrektheit', defaultWeight: 1 },
       { id: 'depth', label: 'Tiefe', defaultWeight: 1 },

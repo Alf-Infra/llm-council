@@ -24,12 +24,20 @@ function App() {
   const [providerBaseUrl, setProviderBaseUrl] = useState('https://openrouter.ai/api/v1');
   const [providerApiKey, setProviderApiKey] = useState('');
   const [providerStatus, setProviderStatus] = useState('');
+  const [catalog, setCatalog] = useState([]);
+  const [catalogStatus, setCatalogStatus] = useState({ loading: true, error: '', stale: false, ageMs: 0 });
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [presets, setPresets] = useState([]);
+  const [presetId, setPresetId] = useState(null);
+  const [mode, setMode] = useState('iterative');
+  const [keyPolicy, setKeyPolicy] = useState('after-run');
   const [models, setModels] = useState([]);
   const [selectedCouncil, setSelectedCouncil] = useState([]);
   const [chairmanModel, setChairmanModel] = useState('');
   const [criteria, setCriteria] = useState([]);
   const [events, setEvents] = useState([]);
   const [currentRunId, setCurrentRunId] = useState(null);
+  const [selectedRun, setSelectedRun] = useState(null);
   const [error, setError] = useState('');
   const [bootError, setBootError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -62,8 +70,23 @@ function App() {
       setChairmanModel(initialModels[2]?.id || initialModels[0]?.id || '');
       setCriteria(cfg.criteria.map((item) => ({ ...item, enabled: true, weight: item.defaultWeight })));
       setConversations(list.conversations || []);
+      loadCatalog();
     } catch (err) {
       setBootError(err.message || 'Die App konnte nicht geladen werden.');
+    }
+  }
+
+  async function loadCatalog(refresh = false) {
+    setCatalogStatus((value) => ({ ...value, loading: true, error: '' }));
+    try {
+      const response = await fetch(`/api/models${refresh ? '?refresh=1' : ''}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Katalog konnte nicht geladen werden.');
+      setCatalog(body.models || []);
+      setPresets(body.presets || []);
+      setCatalogStatus({ loading: false, error: '', stale: Boolean(body.stale), ageMs: body.ageMs || 0 });
+    } catch (err) {
+      setCatalogStatus({ loading: false, error: err.message || 'Katalog konnte nicht geladen werden.', stale: false, ageMs: 0 });
     }
   }
 
@@ -144,15 +167,16 @@ function App() {
     setConversations(list.conversations || []);
   }
 
-  async function openConversation(id) {
+  async function openConversation(id, requestedRunId = null) {
     try {
       const response = await fetch(`/api/conversations/${id}`);
       if (!response.ok) throw new Error('Conversation konnte nicht geöffnet werden.');
       const data = await response.json();
       const runs = data.conversation.runs || [];
-      const latest = runs.reduce((newest, run) => !newest || String(run.started_at || '') > String(newest.started_at || '') ? run : newest, null);
+      const latest = requestedRunId ? runs.find((run) => run.id === requestedRunId) : runs.reduce((newest, run) => !newest || String(run.started_at || '') > String(newest.started_at || '') ? run : newest, null);
       setSelectedConversation(id);
       setCurrentRunId(latest?.id || null);
+      setSelectedRun(latest || null);
       setEvents(latest ? historyToEvents(latest) : []);
       setHistoryOpen(false);
       setConfigOpen(false);
@@ -167,12 +191,41 @@ function App() {
     abortRef.current = null;
     setSelectedConversation(null);
     setCurrentRunId(null);
+    setSelectedRun(null);
     setEvents([]);
     setQuestion('');
     setError('');
     setProviderStatus('');
+    if (keyPolicy === 'after-run') setProviderApiKey('');
     setHistoryOpen(false);
     setConfigOpen(true);
+  }
+
+  function applyPreset(preset) {
+    if (!preset.available) return;
+    const values = [...preset.council, preset.chairman];
+    const next = values.map(makeModel);
+    setModels(next);
+    setSelectedCouncil(next.slice(0, preset.council.length).map((item) => item.id));
+    setChairmanModel(next.at(-1).id);
+    setMode(preset.mode);
+    setPresetId(preset.id);
+  }
+
+  function copyRunConfig(run) {
+    const safe = run?.config;
+    if (!safe) return;
+    const refs = [...(safe.councilModels || []), safe.chairmanModel].filter(Boolean);
+    const next = refs.map((ref) => makeModel(ref.model));
+    setModels(next);
+    setSelectedCouncil(next.slice(0, safe.councilModels?.length || 0).map((item) => item.id));
+    setChairmanModel(next.at(-1)?.id || '');
+    setProviderBaseUrl(refs[0]?.provider?.baseUrl || 'https://openrouter.ai/api/v1');
+    setMode(safe.mode || 'iterative');
+    setPresetId(safe.presetId || null);
+    setProviderApiKey('');
+    setConfigOpen(true);
+    setProviderStatus('Konfiguration übernommen. API-Key bitte neu eingeben und Auswahl validieren.');
   }
 
   function openDrawer(kind, trigger) {
@@ -269,6 +322,15 @@ function App() {
       return;
     }
     setError('');
+    const selectedIds = [...selectedCouncil, chairmanModel].map((id) => models.find((item) => item.id === id)?.value.trim()).filter(Boolean);
+    try {
+      const validationResponse = await fetch('/api/models/validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ models: selectedIds }) });
+      const validation = await validationResponse.json();
+      if (!validationResponse.ok || !validation.ok) throw new Error(validation.error || validation.results?.filter((item) => !item.ok).map((item) => `${item.requestedId}: ${item.error}`).join(' ') || 'Modellvalidierung fehlgeschlagen.');
+    } catch (err) {
+      setError(err.message || 'Modellvalidierung fehlgeschlagen.');
+      return;
+    }
     setEvents([]);
     setConfigOpen(false);
     const controller = new AbortController();
@@ -282,6 +344,9 @@ function App() {
           conversationId: selectedConversation,
           councilModels: selectedCouncil.map((id) => modelRef(models.find((item) => item.id === id)?.value || '')),
           chairmanModel: modelRef(models.find((item) => item.id === chairmanModel)?.value || ''),
+          mode,
+          presetId,
+          priceSnapshot: Object.fromEntries(selectedIds.map((id) => { const price = catalog.find((item) => item.id === id)?.pricing; return [id, { ...price, capturedAt: new Date().toISOString() }]; })),
           criteria: criteria.filter((item) => item.enabled).map(({ id, weight }) => ({ id, weight }))
         }),
         signal: controller.signal
@@ -300,6 +365,7 @@ function App() {
       if (err.name !== 'AbortError') setError(err.message || 'Der Lauf ist fehlgeschlagen.');
     } finally {
       abortRef.current = null;
+      if (keyPolicy === 'after-run') setProviderApiKey('');
     }
   }
 
@@ -308,6 +374,7 @@ function App() {
     if (currentRunId) await fetch(`/api/runs/${currentRunId}/cancel`, { method: 'POST' });
     setEvents((prev) => [...prev, { type: 'aborted', error: 'Der Lauf wurde abgebrochen.' }]);
     abortRef.current = null;
+    if (keyPolicy === 'after-run') setProviderApiKey('');
     await refreshConversations();
   }
 
@@ -327,11 +394,12 @@ function App() {
         <div className="history">
           {conversations.map((item) => (
             <div className={item.id === selectedConversation ? 'historyItem active' : 'historyItem'} key={item.id}>
-              <button className="historyContent" onClick={() => openConversation(item.id)} aria-current={item.id === selectedConversation ? 'page' : undefined}>
+              <button className="historyContent" onClick={() => openConversation(item.id)} aria-expanded={item.id === selectedConversation}>
                 <span>{item.title}</span>
                 <small>{statusText[item.latest_status] || item.latest_status || 'bereit'}</small>
               </button>
               <button className="icon deleteConv" onClick={() => { if (confirm('Conversation endgültig löschen?')) { fetch(`/api/conversations/${item.id}`, { method: 'DELETE' }).then(() => { if (selectedConversation === item.id) newConversation(); refreshConversations(); }); } }} aria-label={`Conversation „${item.title}“ löschen`}><Trash2 size={14} aria-hidden="true" /></button>
+              <div className="runHistory" role="group" aria-label={`Läufe in ${item.title}`}>{(item.runs || []).map((run) => <button key={run.id} className={run.id === currentRunId ? 'runHistoryItem active' : 'runHistoryItem'} aria-current={run.id === currentRunId ? 'page' : undefined} onClick={() => openConversation(item.id, run.id)}><span>{new Date(run.started_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</span><small>{statusText[run.status] || run.status} · {run.mode === 'standard' ? '3 Phasen' : '5 Phasen'} · {run.id.slice(-6)}</small></button>)}</div>
             </div>
           ))}
         </div>
@@ -350,7 +418,7 @@ function App() {
           {error && <div className="error" role="alert">{error}</div>}
         </section>
 
-        <RunView state={state} runId={currentRunId} />
+        <RunView state={state} runId={currentRunId} mode={selectedRun ? (selectedRun.config?.mode || 'iterative') : mode} onCopyConfig={selectedRun ? () => copyRunConfig(selectedRun) : null} />
       </main>
 
       <aside ref={configDrawerRef} className={`configRail ${configOpen ? 'drawerOpen' : ''}`} aria-label="Laufkonfiguration" role={configModalOpen ? 'dialog' : undefined} aria-modal={configModalOpen ? 'true' : undefined} inert={viewportWidth <= 1100 && !configOpen ? true : undefined}>
@@ -361,9 +429,13 @@ function App() {
             <div className="providerGrid">
               <label>Base URL<input value={providerBaseUrl} onChange={(e) => setProviderBaseUrl(e.target.value)} /></label>
               <label>API-Key<input type="password" value={providerApiKey} onChange={(e) => setProviderApiKey(e.target.value)} autoComplete="off" placeholder="sk-or-..." /></label>
+              <div className="keyActions"><button type="button" onClick={() => { setProviderApiKey(''); setProviderStatus('API-Key wurde aus dem flüchtigen Zustand gelöscht.'); }}>API-Key löschen</button><label>Aufbewahrung<select value={keyPolicy} onChange={(event) => setKeyPolicy(event.target.value)}><option value="after-run">Nach jedem Lauf löschen</option><option value="tab">Bis Tab geschlossen wird</option></select></label></div>
               <button onClick={testProvider}>Provider testen</button>
             </div>
             {providerStatus && <div className="providerStatus" role="status" aria-live="polite">{providerStatus}</div>}
+            <div className="catalogPanel"><div className="panelHeader"><h3>Modellkatalog</h3><button type="button" onClick={() => loadCatalog(true)}>Aktualisieren</button></div>{catalogStatus.loading ? <p role="status">Katalog wird geladen…</p> : catalogStatus.error ? <div className="error" role="alert">{catalogStatus.error} <button onClick={() => loadCatalog(true)}>Wiederholen</button></div> : <><p role="status">{catalog.length} textfähige Modelle geladen{catalogStatus.stale ? ' (veralteter Cache)' : ''}.</p><label>Modelle suchen<input type="search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Anbieter, Name oder Slug" /></label><div className="catalogResults" role="listbox" aria-label="OpenRouter-Modelle">{catalog.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(catalogQuery.toLowerCase())).slice(0, 30).map((item) => <button type="button" role="option" aria-selected="false" key={item.id} onClick={() => setModels([...models, makeModel(item.id)])}><strong>{item.name}</strong><span>{item.id}</span><small>{item.contextLength ? `${item.contextLength.toLocaleString('de-DE')} Kontext` : 'Kontext n/v'} · {formatPrice(item.pricing)}</small></button>)}</div></>}</div>
+            <fieldset className="presets"><legend>Presets</legend>{presets.map((preset) => <button type="button" key={preset.id} disabled={!preset.available} aria-pressed={presetId === preset.id} onClick={() => applyPreset(preset)}><strong>{preset.label}</strong><span>{preset.mode === 'standard' ? '3 Phasen' : '5 Phasen'} · {preset.available ? 'verfügbar' : 'Modell fehlt'}</span></button>)}</fieldset>
+            <fieldset className="runMode"><legend>Laufmodus</legend><label><input type="radio" name="mode" checked={mode === 'standard'} onChange={() => { setMode('standard'); setPresetId(null); }} /> Standard (3 Phasen)</label><label><input type="radio" name="mode" checked={mode === 'iterative'} onChange={() => { setMode('iterative'); setPresetId(null); }} /> Iterativ (5 Phasen)</label><RunPreview mode={mode} models={models} selectedCouncil={selectedCouncil} chairmanModel={chairmanModel} catalog={catalog} /></fieldset>
             <fieldset className="modelList"><legend>Modelle und Rollen</legend>
               {models.map((model, index) => (
                 <div className="modelRow" key={model.id}>
@@ -393,14 +465,15 @@ function App() {
   );
 }
 
-const phaseLabels = { answers: '1 Antworten', reviews: '2 Peer-Review', improvement: '3 Verbesserung', re_review: '4 Re-Review', synthesis: '5 Synthese' };
-const phases = ['answers', 'reviews', 'improvement', 're_review', 'synthesis'];
+const phaseLabels = { answers: 'Antworten', reviews: 'Peer-Review', improvement: 'Verbesserung', re_review: 'Re-Review', synthesis: 'Synthese' };
 
-function RunView({ state }) {
+function RunView({ state, mode = 'iterative', onCopyConfig }) {
   const [activeTab, setActiveTab] = useState('synthesis');
   const [selectedAnswers, setSelectedAnswers] = useState([]);
   const tabRefs = useRef([]);
+  const phases = mode === 'standard' ? ['answers', 'reviews', 'synthesis'] : ['answers', 'reviews', 'improvement', 're_review', 'synthesis'];
   const currentIndex = phases.indexOf(state.stage);
+  const currentPhaseLabel = `${Math.max(0, currentIndex) + 1} ${phaseLabels[state.stage] || state.stage}`;
   const completed = Boolean(state.finalAnswer || state.summary);
   const hasArtifacts = state.responses.length || state.reviews.length || state.ranking.length || completed;
   const responseProgress = state.responses.length
@@ -436,13 +509,13 @@ function RunView({ state }) {
     <section className="run">
       <h2 className="srOnly">Fortschritt und Ergebnisse</h2>
       <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="phase-live-status">
-        Aktuelle Phase: {phaseLabels[state.stage] || state.stage}.
+        Aktuelle Phase: {currentPhaseLabel}.
       </p>
       <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="council-live-status">
         {responseProgress}
       </p>
       <ol className="phaseStrip" aria-label="Laufphasen">
-        {phases.map((phase, index) => <li className={`${state.stage === phase ? 'phase active' : 'phase'}${index < currentIndex ? ' complete' : ''}`} aria-current={state.stage === phase ? 'step' : undefined} key={phase}><span className="srOnly">{index < currentIndex ? 'Abgeschlossen: ' : state.stage === phase ? 'Aktuell: ' : 'Ausstehend: '}</span>{phaseLabels[phase]}</li>)}
+        {phases.map((phase, index) => <li className={`${state.stage === phase ? 'phase active' : 'phase'}${index < currentIndex ? ' complete' : ''}`} aria-current={state.stage === phase ? 'step' : undefined} key={phase}><span className="srOnly">{index < currentIndex ? 'Abgeschlossen: ' : state.stage === phase ? 'Aktuell: ' : 'Ausstehend: '}</span>{index + 1} {phaseLabels[phase]}</li>)}
       </ol>
       {completed && <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="run-complete-status">Council-Lauf abgeschlossen. Die finale Phase ist Synthese.</p>}
       {!hasArtifacts ? <div className="emptyWorkspace"><h2>Bereit für eine gemeinsame Analyse</h2><p>Konfiguriere mindestens zwei Council-Modelle und starte eine Frage. Antworten, Bewertungen und Synthese erscheinen kompakt in getrennten Ansichten.</p></div> : <>
@@ -464,7 +537,7 @@ function RunView({ state }) {
           <div className="reviewGrid">{state.reviews.map((item) => <ReviewCard item={item} key={item.reviewerModel || item.model} />)}{state.reReviews.map((item) => <ReviewCard item={item} key={`re-${item.reviewerModel || item.model}`} />)}</div>
         </section>
         <section id="panel-run-data" role="tabpanel" aria-labelledby="tab-run-data" hidden={activeTab !== 'run-data'} className="resultPanel">
-          <p className="eyebrow">Metadaten</p><h2>Laufdaten</h2>{state.summary ? <Summary summary={state.summary} /> : <p className="muted">Noch keine Laufzusammenfassung verfügbar.</p>}
+          <p className="eyebrow">Metadaten</p><h2>Laufdaten</h2>{state.summary ? <Summary summary={state.summary} /> : <p className="muted">Noch keine Laufzusammenfassung verfügbar.</p>}{onCopyConfig && <button type="button" onClick={onCopyConfig}>Konfiguration übernehmen</button>}
         </section>
       </>}
     </section>
@@ -506,8 +579,26 @@ function ScoreList({ scores }) {
 }
 
 function Summary({ summary }) {
-  return <dl className="summary"><div><dt>Dauer</dt><dd>{formatDuration(summary.durationMs)}</dd></div><div><dt>Modellaufrufe</dt><dd>{summary.modelCalls}</dd></div><div><dt>Erfolgreich</dt><dd>{summary.successfulCalls}</dd></div><div><dt>Fehler</dt><dd>{summary.failedCalls}</dd></div><div><dt>Tokens</dt><dd>{summary.tokenTotals?.total || 0}</dd></div></dl>;
+  return <><dl className="summary"><div><dt>Dauer</dt><dd>{formatDuration(summary.durationMs)}</dd></div><div><dt>Modellaufrufe</dt><dd>{summary.modelCalls}</dd></div><div><dt>Erfolgreich</dt><dd>{summary.successfulCalls}</dd></div><div><dt>Fehler</dt><dd>{summary.failedCalls}</dd></div><div><dt>Tokens</dt><dd>{summary.tokenTotals?.total || 0}</dd></div><div><dt>Geschätzte tatsächliche Kosten</dt><dd>{summary.costEstimate?.totalUsd != null ? `${formatUsd(summary.costEstimate.totalUsd)}${summary.costEstimate.complete ? '' : ' (unvollständig)'}` : 'nicht verfügbar'}</dd></div></dl>{summary.costEstimate?.byCall?.length > 0 && <details><summary>Kosten nach Modellaufruf</summary><ul>{summary.costEstimate.byCall.map((item, index) => <li key={`${item.model}-${index}`}>{item.model}: {item.estimatedUsd == null ? 'nicht verfügbar' : formatUsd(item.estimatedUsd)}</li>)}</ul></details>}</>;
 }
+
+function RunPreview({ mode, models, selectedCouncil, chairmanModel, catalog }) {
+  const council = selectedCouncil.map((id) => models.find((item) => item.id === id)?.value).filter(Boolean);
+  const chairman = models.find((item) => item.id === chairmanModel)?.value;
+  const calls = (mode === 'iterative' ? 4 : 2) * council.length + 1;
+  const priceKnown = [...council, chairman].filter(Boolean).every((id) => { const pricing = catalog.find((item) => item.id === id)?.pricing; return pricing?.prompt != null && pricing?.completion != null; });
+  const pricingFor = (id) => catalog.find((item) => item.id === id)?.pricing;
+  const callCost = (id, prompt, completion) => { const price = pricingFor(id); return prompt * price.prompt + completion * price.completion + (price.request || 0); };
+  const estimate = priceKnown ? council.reduce((sum, id) => sum + (mode === 'iterative' ? 2 : 1) * (callCost(id, 1500, 1200) + callCost(id, 5000, 900)), 0) + callCost(chairman, 8000, 1800) : null;
+  return <div className="runPreview" role="status"><strong>Laufvorschau</strong><span>{council.length} Council-Modelle · {calls} Basiscalls</span><span>JSON-Reparaturen: bis zu {council.length * (mode === 'iterative' ? 2 : 1)} zusätzliche Calls</span><span>Kostenprognose: {estimate == null ? 'nicht verfügbar (Preise fehlen)' : `ca. ${formatUsd(estimate)}`}</span><details><summary>Annahmen</summary><span>Je Antwortrunde 1.500/1.200, je Review 5.000/900 und Chairman 8.000/1.800 Prompt-/Ausgabetokens. Reparaturcalls sind nicht eingerechnet.</span></details></div>;
+}
+
+function formatPrice(pricing) {
+  if (pricing?.prompt == null || pricing?.completion == null) return 'Preis n/v';
+  return `$${(pricing.prompt * 1_000_000).toFixed(2)} / $${(pricing.completion * 1_000_000).toFixed(2)} je 1 Mio. Token`;
+}
+
+function formatUsd(value) { return `$${Number(value).toFixed(value < 0.01 ? 4 : 2)}`; }
 
 function formatDuration(ms = 0) {
   if (ms < 1000) return `${ms} ms`;

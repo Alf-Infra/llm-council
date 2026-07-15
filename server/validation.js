@@ -14,11 +14,27 @@ export function normalizeRunRequest(body, defaults) {
   if (criteria.some((item) => !Number.isFinite(item.weight) || item.weight <= 0)) errors.push('Kriteriengewichte müssen größer als 0 sein.');
   if ([...councilModels, chairmanModel].filter(Boolean).some((item) => !item.provider.baseUrl)) errors.push('Provider Base URL fehlt.');
 
+  const mode = body?.mode === 'standard' ? 'standard' : 'iterative';
+  const presetId = ['fast', 'balanced', 'thorough'].includes(body?.presetId) ? body.presetId : null;
+  const priceSnapshot = normalizePriceSnapshot(body?.priceSnapshot, [...councilModels, chairmanModel].filter(Boolean));
   return {
     ok: errors.length === 0,
     errors,
-    value: { question, councilModels, chairmanModel, criteria, conversationId: body?.conversationId || null }
+    value: { question, councilModels, chairmanModel, criteria, conversationId: body?.conversationId || null, mode, presetId, priceSnapshot }
   };
+}
+
+function normalizePriceSnapshot(input, models) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  const allowed = new Set(models.map((item) => item.model));
+  return Object.fromEntries(Object.entries(input).filter(([id]) => allowed.has(id)).map(([id, value]) => [id, {
+    prompt: safePrice(value?.prompt), completion: safePrice(value?.completion), request: safePrice(value?.request),
+    capturedAt: typeof value?.capturedAt === 'string' ? value.capturedAt : new Date().toISOString()
+  }]));
+}
+
+function safePrice(value) {
+  return value != null && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
 }
 
 export function normalizeModelRef(input, defaults) {

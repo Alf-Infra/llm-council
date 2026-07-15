@@ -49,17 +49,21 @@ export class CouncilOrchestrator {
       this.store.markRunRevealed(run.id);
       yield emit('answers_revealed', { responses: answers.results.map((item) => revealResponse(item, anonymous)) });
 
-      // Improvement round
-      this.store.updateRun(run.id, { status: 'running', stage: 'improvement' });
-      yield emit('stage', { stage: 'improvement' });
-      const improvements = yield* this.collectImprovements(run.id, input, anonymous, validReviews, signal, emit);
-      const improvedSuccesses = improvements.results.filter((item) => item.status === 'success');
-
       let chairmanAnswers = successes;
       let chairmanReviews = validReviews;
       let chairmanRanking = ranking;
+      let improvements = { results: [] };
+      let improvedSuccesses = [];
+      let reReviewResults = [];
 
-      if (improvedSuccesses.length >= 2) {
+      if (input.mode !== 'standard') {
+        this.store.updateRun(run.id, { status: 'running', stage: 'improvement' });
+        yield emit('stage', { stage: 'improvement' });
+        improvements = yield* this.collectImprovements(run.id, input, anonymous, validReviews, signal, emit);
+        improvedSuccesses = improvements.results.filter((item) => item.status === 'success');
+      }
+
+      if (input.mode !== 'standard' && improvedSuccesses.length >= 2) {
         const improvedAnonymous = anonymizeResponses(improvedSuccesses, this.randomSeedFactory(run.id + '-r2'));
         for (const item of improvedAnonymous) this.store.setAnonymousId(run.id, item.modelKey, item.anonymousId);
         yield emit('improvements_complete', { responses: improvedAnonymous.map(stripPreReviewMapping) });
@@ -68,6 +72,7 @@ export class CouncilOrchestrator {
         this.store.updateRun(run.id, { status: 'running', stage: 're_review' });
         yield emit('stage', { stage: 're_review' });
         const reReviews = yield* this.collectReviews(run.id, input, improvedAnonymous, signal, emit, 2);
+        reReviewResults = reReviews.results;
         const validReReviews = reReviews.results.filter((item) => item.status === 'success').map((item) => item.review);
         const reRanking = aggregateReviews(validReReviews, improvedAnonymous, input.criteria);
         this.store.saveRanking(run.id, reRanking);
@@ -77,22 +82,22 @@ export class CouncilOrchestrator {
         chairmanAnswers = improvedSuccesses;
         chairmanReviews = validReReviews;
         chairmanRanking = reRanking;
-      } else {
+      } else if (input.mode !== 'standard') {
         yield emit('improvements_complete', { responses: [] });
       }
 
       this.store.updateRun(run.id, { status: 'running', stage: 'synthesis' });
       yield emit('stage', { stage: 'synthesis' });
       const chairman = await this.runChairman(run.id, input, chairmanAnswers, chairmanReviews, chairmanRanking, signal);
-      const allResults = [...answers.results, ...reviews.results, ...improvements.results, ...(improvedSuccesses.length >= 2 ? [] : [])];
+      const allResults = [...answers.results, ...reviews.results, ...improvements.results, ...reReviewResults];
       if (chairman.status === 'success') {
         this.store.addMessage(conversation.id, 'assistant', chairman.content);
-        const summary = summarizeRun(started, allResults, [], chairman);
+        const summary = summarizeRun(started, allResults, [], chairman, input.priceSnapshot);
         this.store.updateRun(run.id, { status: 'completed', stage: 'complete', summary, final_answer: chairman.content, completed_at: now() });
         yield emit('final', { finalAnswer: chairman.content, summary });
       } else {
         this.store.addError(run.id, 'chairman', chairman.error);
-        const summary = summarizeRun(started, allResults, [], chairman);
+        const summary = summarizeRun(started, allResults, [], chairman, input.priceSnapshot);
         this.store.updateRun(run.id, { status: 'chairman_failed', stage: 'complete', summary, chairman_error: chairman.error, completed_at: now() });
         yield emit('chairman_failed', { error: chairman.error, summary });
       }
@@ -325,7 +330,7 @@ function summarizeReviewsForChairman(reviews, ranking) {
   }).join('\n\n');
 }
 
-function summarizeRun(started, answerResults, reviewResults, chairman) {
+function summarizeRun(started, answerResults, reviewResults, chairman, priceSnapshot = {}) {
   const calls = [...answerResults, ...reviewResults, chairman].filter(Boolean);
   const tokenTotals = calls.reduce((acc, item) => {
     acc.prompt += item.usage?.prompt_tokens || 0;
@@ -333,12 +338,22 @@ function summarizeRun(started, answerResults, reviewResults, chairman) {
     acc.total += item.usage?.total_tokens || 0;
     return acc;
   }, { prompt: 0, completion: 0, total: 0 });
+  const costs = calls.map((item) => {
+    const model = item.model || item.reviewerModel;
+    const price = priceSnapshot?.[model];
+    const usage = item.usage;
+    const estimatedUsd = price && usage && usage.prompt_tokens != null && usage.completion_tokens != null && price.prompt != null && price.completion != null
+      ? usage.prompt_tokens * price.prompt + usage.completion_tokens * price.completion + (price.request || 0) : null;
+    return { model, promptTokens: usage?.prompt_tokens ?? null, completionTokens: usage?.completion_tokens ?? null, estimatedUsd };
+  });
+  const knownCosts = costs.filter((item) => item.estimatedUsd != null);
   return {
     durationMs: Math.round(performance.now() - started),
     modelCalls: calls.length,
     successfulCalls: calls.filter((item) => item.status === 'success').length,
     failedCalls: calls.filter((item) => item.status === 'failed').length,
-    tokenTotals
+    tokenTotals,
+    costEstimate: { complete: knownCosts.length === costs.length, totalUsd: knownCosts.length ? knownCosts.reduce((sum, item) => sum + item.estimatedUsd, 0) : null, byCall: costs }
   };
 }
 
@@ -382,7 +397,10 @@ function redactConfig(input) {
   return {
     councilModels: input.councilModels.map((item) => (typeof item === 'string' ? item : safeModelRef(item))),
     chairmanModel: typeof input.chairmanModel === 'string' ? input.chairmanModel : safeModelRef(input.chairmanModel),
-    criteria: input.criteria
+    criteria: input.criteria,
+    mode: input.mode || 'iterative',
+    presetId: input.presetId || null,
+    priceSnapshot: input.priceSnapshot || {}
   };
 }
 

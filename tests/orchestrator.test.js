@@ -119,6 +119,23 @@ test('invalid review JSON is repaired once by the same model', async () => {
   assert.equal(provider.calls.filter((call) => call.model === 'a').length, 5);
 });
 
+test('standard mode executes three phases while legacy missing mode remains iterative', async () => {
+  const dbPath = path.join(os.tmpdir(), `llm-council-standard-${Date.now()}-${Math.random()}.db`);
+  const store = new CouncilStore(createDb(dbPath));
+  const review = () => ({ content: reviewJson(['Response A', 'Response B']), usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 }, latencyMs: 2 });
+  const provider = new FakeProvider({ a: ['A', review], b: ['B', review], chair: ['Final'] });
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'fixed' });
+  const events = [];
+  const priceSnapshot = { a: { prompt: 0.001, completion: 0.002, request: 0 }, b: { prompt: 0.001, completion: 0.002, request: 0 }, chair: { prompt: 0.001, completion: 0.002, request: 0 } };
+  for await (const event of orchestrator.run({ question: 'Q?', councilModels: ['a', 'b'], chairmanModel: 'chair', criteria, mode: 'standard', priceSnapshot }, new AbortController().signal)) events.push(event);
+  assert.deepEqual(events.filter((event) => event.type === 'stage').map((event) => event.stage), ['answers', 'reviews', 'synthesis']);
+  assert.equal(provider.calls.length, 5);
+  const final = events.find((event) => event.type === 'final');
+  assert.ok(final.summary.costEstimate.totalUsd > 0);
+  assert.equal(store.getRun(final.runId).config.mode, 'standard');
+  assert.deepEqual(store.getResponses(final.runId).map((item) => item.round), [1, 1]);
+});
+
 test('answer progress events stream before answer promises settle', async () => {
   const dbPath = path.join(os.tmpdir(), `llm-council-stream-${Date.now()}-${Math.random()}.db`);
   const store = new CouncilStore(createDb(dbPath));

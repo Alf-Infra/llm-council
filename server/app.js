@@ -6,6 +6,7 @@ import { loadRuntimeConfig, safeUiConfig } from './config.js';
 import { OpenAICompatibleProvider } from './provider.js';
 import { CouncilOrchestrator } from './orchestrator.js';
 import { normalizeModelRef, normalizeRunRequest } from './validation.js';
+import { OpenRouterCatalog, validatePresets } from './catalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -15,6 +16,7 @@ export function createApp(options = {}) {
   const store = options.store || new CouncilStore(options.db || createDb(options.dbPath));
   const provider = options.provider || new OpenAICompatibleProvider(config);
   const orchestrator = options.orchestrator || new CouncilOrchestrator({ provider, store });
+  const catalog = options.catalog || new OpenRouterCatalog(options.catalogOptions);
   const controllers = new Map();
   const app = express();
 
@@ -22,6 +24,24 @@ export function createApp(options = {}) {
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
   app.get('/api/config', (_req, res) => res.json(safeUiConfig(config)));
+  app.get('/api/models', async (req, res) => {
+    try {
+      const result = await catalog.getModels({ refresh: req.query.refresh === '1' });
+      return res.json({ ...result, presets: validatePresets(result.models) });
+    } catch (error) {
+      return res.status(502).json({ error: 'OpenRouter-Modellkatalog ist derzeit nicht verfügbar.' });
+    }
+  });
+  app.post('/api/models/validate', async (req, res) => {
+    const ids = Array.isArray(req.body?.models) ? [...new Set(req.body.models.map(String))].slice(0, 20) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Bitte Modelle zur Validierung angeben.' });
+    try {
+      const results = await catalog.validateSelection(ids);
+      return res.json({ ok: results.every((item) => item.ok), results });
+    } catch (_error) {
+      return res.status(502).json({ error: 'Modellvalidierung ist derzeit nicht verfügbar.' });
+    }
+  });
   app.post('/api/provider/test', async (req, res) => {
     const modelRef = normalizeModelRef(req.body, config);
     if (!modelRef) return res.status(400).json({ ok: false, error: 'Bitte Provider und Modell angeben.' });

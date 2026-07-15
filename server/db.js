@@ -192,7 +192,13 @@ export class CouncilStore {
   }
 
   listConversations() {
-    return this.db.prepare(`SELECT c.*, (SELECT status FROM runs r WHERE r.conversation_id = c.id ORDER BY r.started_at DESC LIMIT 1) AS latest_status FROM conversations c ORDER BY updated_at DESC`).all();
+    return this.db.prepare(`SELECT c.*, (SELECT status FROM runs r WHERE r.conversation_id = c.id ORDER BY r.started_at DESC LIMIT 1) AS latest_status FROM conversations c ORDER BY updated_at DESC`).all().map((conversation) => ({
+      ...conversation,
+      runs: this.db.prepare('SELECT id, status, stage, config_json, started_at, completed_at FROM runs WHERE conversation_id = ? ORDER BY started_at DESC').all(conversation.id).map((run) => {
+        const config = parseJson(run.config_json) || {};
+        return { id: run.id, status: run.status, stage: run.stage, started_at: run.started_at, completed_at: run.completed_at, mode: config.mode || 'iterative', models: (config.councilModels || []).map((item) => item.model) };
+      })
+    }));
   }
 
   getResponses(runId) {
