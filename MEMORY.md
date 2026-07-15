@@ -34,3 +34,4 @@
 - Abgrenzung: OpenRouter-Katalog, Presets, Kosten und erweiterte Laufhistorie bleiben Paket 3.
 - Kevin hat nach ausgeschöpften zwei regulären Build-Versuchen einen dritten, eng begrenzten Fix für die Fokus-Rückgabe beim Backdrop-Schließen des mobilen Konfigurationsdrawers freigegeben.
 - Gate-Override: Kevin hat am 2026-07-15 Variante B und damit den Deploy trotz rotem finalem Tester-Gate ausdrücklich freigegeben. Akzeptierte Einschränkung: Im mobilen 390-px-Konfigurationsdialog sind Header, Workspace und Skip-Link nicht wirksam `inert`; Desktop ist nicht betroffen, Fokusfalle und Fokus-Rückgabe funktionieren. Dieser Restpunkt wird mit Paket 3 behoben.
+- Deploy: GitHub-Push und PM2-Restart erfolgreich; Produktions-Healthcheck auf Port 3110 grün. Deploy-Commit: `1f897ff`.
