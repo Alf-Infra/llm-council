@@ -13,8 +13,12 @@ const config = {
 
 const completedRun = {
   id: 'run-new', started_at: '2026-07-15T12:00:00Z', stage: 'complete', status: 'completed', revealed_at: '2026-07-15T12:00:05Z',
-  responses: [{ model: 'alpha/model', anonymous_id: 'Response A', status: 'success', content: '# Antwort', latency_ms: 20, total_tokens: 12 }],
-  reviews: [], ranking: [{ rank: 1, responseId: 'Response A', model: 'alpha/model', weightedScore: 9, validVotes: 2 }],
+  responses: [
+    { model: 'alpha/model', anonymous_id: 'Response A', status: 'success', content: '### Tiefenanalyse\n\nAntwort A mit ausführlichem Inhalt.\n\n'.repeat(12), latency_ms: 20, total_tokens: 12 },
+    { model: 'beta/model', anonymous_id: 'Response B', status: 'success', content: '## Alternative\n\nAntwort B mit einem anderen Ansatz.\n\n'.repeat(12), latency_ms: 30, total_tokens: 14 }
+  ],
+  reviews: [{ reviewer_model: 'beta/model', status: 'success', review: { responses: [{ responseId: 'Response A', scores: { correctness: 9, depth: 8, utility: 9 }, rationale: 'Sehr schlüssig.', strengths: ['Präzise'], weaknesses: ['Knapp'] }], ranking: ['Response A', 'Response B'] } }],
+  ranking: [{ rank: 1, responseId: 'Response A', model: 'alpha/model', weightedScore: 9, validVotes: 2 }, { rank: 2, responseId: 'Response B', model: 'beta/model', weightedScore: 8, validVotes: 2 }],
   final_answer: '# Synthese', summary: { durationMs: 100, modelCalls: 3, successfulCalls: 3, failedCalls: 0, tokenTotals: { total: 20 } }
 };
 
@@ -101,8 +105,9 @@ test('Live-Regionen melden Phasen-, Council-, Modell- und Abschlussstatus geziel
 
   const councilStatus = page.getByTestId('council-live-status');
   await expect(councilStatus).toHaveAttribute('aria-atomic', 'true');
-  await expect(councilStatus).toContainText('1 von 1 Council-Antworten abgeschlossen');
+  await expect(councilStatus).toContainText('2 von 2 Council-Antworten abgeschlossen');
 
+  await page.getByRole('tab', { name: 'Antworten' }).click();
   const modelStatus = page.getByRole('status', { name: 'Response A: fertig' });
   await expect(modelStatus).toHaveAttribute('aria-live', 'polite');
   await expect(modelStatus).toHaveText('fertig');
@@ -110,4 +115,76 @@ test('Live-Regionen melden Phasen-, Council-, Modell- und Abschlussstatus geziel
   const completionStatus = page.getByTestId('run-complete-status');
   await expect(completionStatus).toHaveAttribute('role', 'status');
   await expect(completionStatus).toContainText('Council-Lauf abgeschlossen');
+});
+
+test('Synthese ist aktiv und Ergebnis-Tabs folgen dem Tastaturmuster', async ({ page }) => {
+  await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
+  const synthesis = page.getByRole('tab', { name: 'Synthese' });
+  await expect(synthesis).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel', { name: 'Synthese' })).toBeVisible();
+  await synthesis.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Antworten' })).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('End');
+  await expect(page.getByRole('tab', { name: 'Laufdaten' })).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(synthesis).toBeFocused();
+});
+
+test('zwei Antworten lassen sich auswählen und vergleichen', async ({ page }) => {
+  await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
+  await page.getByRole('tab', { name: 'Antworten' }).click();
+  await page.getByRole('checkbox', { name: 'Response A' }).check();
+  await page.getByRole('checkbox', { name: 'Response B' }).check();
+  await expect(page.getByTestId('answer-comparison').locator('article')).toHaveCount(2);
+});
+
+test('Reviews sind strukturiert, technische Details standardmäßig geschlossen', async ({ page }) => {
+  await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
+  await page.getByRole('tab', { name: 'Bewertungen' }).click();
+  await expect(page.getByText('9/10').first()).toBeVisible();
+  const technical = page.getByText('Technische Details').locator('..');
+  await expect(technical).not.toHaveAttribute('open', '');
+  await expect(page.locator('.technical pre')).not.toBeVisible();
+});
+
+test('Desktop-Konfiguration und mobile Drawer schließen per Escape mit Fokus-Rückgabe', async ({ page }) => {
+  const desktopToggle = page.getByRole('button', { name: 'Konfiguration schließen' });
+  await desktopToggle.click();
+  await expect(page.getByRole('complementary', { name: 'Laufkonfiguration' })).toBeHidden();
+  await page.setViewportSize({ width: 390, height: 850 });
+  const historyTrigger = page.getByRole('button', { name: 'Historie öffnen' });
+  await historyTrigger.click();
+  await expect(page.getByRole('complementary', { name: 'Conversation-Historie' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(historyTrigger).toBeFocused();
+  const backdrop = page.getByRole('button', { name: 'Drawer schließen' });
+  if (await backdrop.isVisible()) await backdrop.click();
+  const configTrigger = page.getByRole('button', { name: 'Konfiguration öffnen' }).first();
+  await configTrigger.click();
+  await page.keyboard.press('Escape');
+  await expect(configTrigger).toBeFocused();
+});
+
+test('Markdown-### wahrt genau ein h1 und verletzt die Heading-Reihenfolge nicht', async ({ page }) => {
+  await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
+  await page.getByRole('tab', { name: 'Antworten' }).click();
+  await expect(page.locator('h1')).toHaveCount(1);
+  const result = await new AxeBuilder({ page }).withRules(['heading-order']).analyze();
+  expect(result.violations).toEqual([]);
+});
+
+test('mobile Vergleichsansicht stapelt und langer Lauf bleibt kompakt', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 850 });
+  await page.getByRole('button', { name: 'Historie öffnen' }).click();
+  await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
+  await page.getByRole('tab', { name: 'Antworten' }).click();
+  await page.getByRole('checkbox', { name: 'Response A' }).check();
+  await page.getByRole('checkbox', { name: 'Response B' }).check();
+  const cards = page.getByTestId('answer-comparison').locator('article');
+  const boxes = await Promise.all([cards.nth(0).boundingBox(), cards.nth(1).boundingBox()]);
+  expect(boxes[1].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 2);
+  await page.getByRole('tab', { name: 'Synthese' }).click();
+  const height = await page.evaluate(() => document.documentElement.scrollHeight);
+  expect(height).toBeLessThan(5000);
 });

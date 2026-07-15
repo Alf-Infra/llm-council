@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import ReactMarkdown from 'react-markdown';
-import { Download, PauseCircle, Play, Plus, Trash2 } from 'lucide-react';
+import { Download, Menu, PanelRightOpen, PauseCircle, Play, Plus, Trash2, X } from 'lucide-react';
 import './styles.css';
 
 const statusText = {
@@ -32,6 +32,12 @@ function App() {
   const [currentRunId, setCurrentRunId] = useState(null);
   const [error, setError] = useState('');
   const [bootError, setBootError] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(true);
+  const historyTriggerRef = useRef(null);
+  const configTriggerRef = useRef(null);
+  const historyDrawerRef = useRef(null);
+  const configDrawerRef = useRef(null);
   const abortRef = useRef(null);
   const running = Boolean(abortRef.current);
 
@@ -58,6 +64,40 @@ function App() {
     loadInitial();
   }, []);
 
+  useEffect(() => {
+    if (!historyOpen && !configOpen) return undefined;
+    const drawer = historyOpen ? historyDrawerRef.current : window.matchMedia('(max-width: 1100px)').matches ? configDrawerRef.current : null;
+    const handleKeys = (event) => {
+      if (event.key === 'Escape') {
+        if (historyOpen) closeDrawer('history');
+        else if (drawer) closeDrawer('config');
+        return;
+      }
+      if (event.key !== 'Tab' || !drawer) return;
+      const focusable = [...drawer.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), a[href], summary')].filter((node) => node.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', handleKeys);
+    return () => document.removeEventListener('keydown', handleKeys);
+  }, [historyOpen, configOpen]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 760px)');
+    const adapt = (event) => {
+      if (event.matches) {
+        setHistoryOpen(false);
+        setConfigOpen(false);
+      }
+    };
+    adapt(media);
+    media.addEventListener('change', adapt);
+    return () => media.removeEventListener('change', adapt);
+  }, []);
+
   const state = useMemo(() => deriveRunState(events), [events]);
 
   async function refreshConversations() {
@@ -75,6 +115,8 @@ function App() {
       setSelectedConversation(id);
       setCurrentRunId(latest?.id || null);
       setEvents(latest ? historyToEvents(latest) : []);
+      setHistoryOpen(false);
+      setConfigOpen(false);
       setError('');
     } catch (err) {
       setError(err.message);
@@ -90,6 +132,18 @@ function App() {
     setQuestion('');
     setError('');
     setProviderStatus('');
+    setHistoryOpen(false);
+    setConfigOpen(true);
+  }
+
+  function closeDrawer(kind) {
+    if (kind === 'history') {
+      setHistoryOpen(false);
+      requestAnimationFrame(() => historyTriggerRef.current?.focus());
+    } else {
+      setConfigOpen(false);
+      requestAnimationFrame(() => configTriggerRef.current?.focus());
+    }
   }
 
   function addModel() {
@@ -208,9 +262,15 @@ function App() {
   if (!config) return <main className="boot" id="main-content"><h1>LLM Council</h1>{bootError ? <><div className="error" role="alert">{bootError}</div><button onClick={loadInitial}>Erneut versuchen</button></> : <p role="status">App wird geladen…</p>}</main>;
 
   return (
-    <><a className="skipLink" href="#main-content">Zum Hauptinhalt springen</a><div className="shell">
-      <aside className="sidebar">
-        <div className="brand" aria-hidden="true">LLM Council</div>
+    <><a className="skipLink" href="#main-content">Zum Hauptinhalt springen</a><div className={`shell ${configOpen ? '' : 'configCollapsed'}`}>
+      <header className="mobileBar">
+        <button ref={historyTriggerRef} className="icon" aria-label="Historie öffnen" aria-expanded={historyOpen} onClick={() => setHistoryOpen(true)}><Menu aria-hidden="true" /></button>
+        <strong>LLM Council</strong>
+        <button className="icon" aria-label="Konfiguration öffnen" aria-expanded={configOpen} onClick={(event) => { configTriggerRef.current = event.currentTarget; setConfigOpen(true); }}><PanelRightOpen aria-hidden="true" /></button>
+      </header>
+      {(historyOpen || configOpen) && <button className="drawerBackdrop" aria-label="Drawer schließen" onClick={() => historyOpen ? closeDrawer('history') : closeDrawer('config')} />}
+      <aside ref={historyDrawerRef} className={`sidebar ${historyOpen ? 'drawerOpen' : ''}`} aria-label="Conversation-Historie">
+        <div className="asideHeading"><div className="brand" aria-hidden="true">LLM Council</div><button className="icon drawerClose" aria-label="Historie schließen" onClick={() => closeDrawer('history')}><X aria-hidden="true" /></button></div>
         <button className="new" onClick={newConversation}>Neue Conversation</button>
         <div className="history">
           {conversations.map((item) => (
@@ -226,7 +286,7 @@ function App() {
       </aside>
 
       <main className="workspace" id="main-content">
-        <h1>LLM Council Analyse</h1>
+        <div className="workspaceHeading"><div><p className="eyebrow">Council Analysis Workspace</p><h1>LLM Council Analyse</h1></div><button className="configToggle" aria-expanded={configOpen} onClick={(event) => { configTriggerRef.current = event.currentTarget; setConfigOpen(!configOpen); }}><PanelRightOpen size={17} aria-hidden="true" /> {configOpen ? 'Konfiguration schließen' : 'Konfiguration öffnen'}</button></div>
         <section className="composer">
           <label htmlFor="question">Frage an das Council</label>
           <textarea id="question" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Was soll das Council analysieren?" />
@@ -238,8 +298,13 @@ function App() {
           {error && <div className="error" role="alert">{error}</div>}
         </section>
 
-        <section className="configGrid">
-          <div className="panel">
+        <RunView state={state} runId={currentRunId} />
+      </main>
+
+      <aside ref={configDrawerRef} className={`configRail ${configOpen ? 'drawerOpen' : ''}`} aria-label="Laufkonfiguration">
+        <div className="asideHeading"><div><p className="eyebrow">Einstellungen</p><h2>Konfiguration</h2></div><button className="icon drawerClose" aria-label="Konfiguration schließen" onClick={() => closeDrawer('config')}><X aria-hidden="true" /></button></div>
+        <section className="configStack">
+          <div className="configSection">
             <div className="panelHeader"><h2>OpenRouter</h2><button className="icon" onClick={addModel} title="Modell hinzufügen"><Plus size={16} /></button></div>
             <div className="providerGrid">
               <label>Base URL<input value={providerBaseUrl} onChange={(e) => setProviderBaseUrl(e.target.value)} /></label>
@@ -260,7 +325,7 @@ function App() {
             </fieldset>
           </div>
 
-          <div className="panel">
+          <div className="configSection">
             <h2>Kriterien</h2>
             <fieldset className="criteria"><legend>Bewertungskriterien und Gewichtung</legend>{criteria.map((item) => (
               <div className="criterion" key={item.id}>
@@ -271,9 +336,7 @@ function App() {
             ))}</fieldset>
           </div>
         </section>
-
-        <RunView state={state} runId={currentRunId} />
-      </main>
+      </aside>
     </div></>
   );
 }
@@ -282,11 +345,41 @@ const phaseLabels = { answers: '1 Antworten', reviews: '2 Peer-Review', improvem
 const phases = ['answers', 'reviews', 'improvement', 're_review', 'synthesis'];
 
 function RunView({ state }) {
+  const [activeTab, setActiveTab] = useState('synthesis');
+  const [selectedAnswers, setSelectedAnswers] = useState([]);
+  const tabRefs = useRef([]);
   const currentIndex = phases.indexOf(state.stage);
   const completed = Boolean(state.finalAnswer || state.summary);
+  const hasArtifacts = state.responses.length || state.reviews.length || state.ranking.length || completed;
   const responseProgress = state.responses.length
     ? `${state.responses.filter((item) => ['success', 'failed'].includes(item.status)).length} von ${state.responses.length} Council-Antworten abgeschlossen.`
     : 'Council-Antworten noch nicht gestartet.';
+  useEffect(() => {
+    if (completed) setActiveTab('synthesis');
+  }, [completed]);
+
+  const tabs = [
+    { id: 'synthesis', label: 'Synthese' },
+    { id: 'answers', label: 'Antworten' },
+    { id: 'reviews', label: 'Bewertungen' },
+    { id: 'run-data', label: 'Laufdaten' }
+  ];
+  function onTabKeyDown(event, index) {
+    let next = null;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = tabs.length - 1;
+    if (next !== null) {
+      event.preventDefault();
+      setActiveTab(tabs[next].id);
+      tabRefs.current[next]?.focus();
+    }
+  }
+  function toggleAnswer(id) {
+    setSelectedAnswers((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 2 ? [...current, id] : [current[1], id]);
+  }
+  const comparison = state.responses.filter((item) => selectedAnswers.includes(item.anonymousId || item.model));
   return (
     <section className="run">
       <h2 className="srOnly">Fortschritt und Ergebnisse</h2>
@@ -300,41 +393,28 @@ function RunView({ state }) {
         {phases.map((phase, index) => <li className={`${state.stage === phase ? 'phase active' : 'phase'}${index < currentIndex ? ' complete' : ''}`} aria-current={state.stage === phase ? 'step' : undefined} key={phase}><span className="srOnly">{index < currentIndex ? 'Abgeschlossen: ' : state.stage === phase ? 'Aktuell: ' : 'Ausstehend: '}</span>{phaseLabels[phase]}</li>)}
       </ol>
       {completed && <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="run-complete-status">Council-Lauf abgeschlossen. Die finale Phase ist Synthese.</p>}
-      {state.summary && <Summary summary={state.summary} />}
-      <div className="columns">
-        <div className="panel">
-          <h2>Einzelantworten</h2>
-          <div className="cards">{state.responses.map((item) => <ResponseCard item={item} key={item.anonymousId || item.model} />)}</div>
+      {!hasArtifacts ? <div className="emptyWorkspace"><h2>Bereit für eine gemeinsame Analyse</h2><p>Konfiguriere mindestens zwei Council-Modelle und starte eine Frage. Antworten, Bewertungen und Synthese erscheinen kompakt in getrennten Ansichten.</p></div> : <>
+        <div className="resultTabs" role="tablist" aria-label="Ergebnisansichten">
+          {tabs.map((tab, index) => <button key={tab.id} ref={(node) => { tabRefs.current[index] = node; }} id={`tab-${tab.id}`} role="tab" aria-selected={activeTab === tab.id} aria-controls={`panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} onKeyDown={(event) => onTabKeyDown(event, index)} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
         </div>
-        <div className="panel">
-          <h2>Rangliste (Runde 1)</h2>
-          <RankingTable ranking={state.ranking} caption="Rangliste der ersten Bewertungsrunde" />
-        </div>
-      </div>
-      <div className="panel">
-        <h2>Reviews</h2>
-        <div className="reviewGrid">{state.reviews.map((item) => <ReviewCard item={item} key={item.reviewerModel || item.model} />)}</div>
-      </div>
-      {state.improvedResponses.length > 0 && <>
-        <div className="columns">
-          <div className="panel">
-            <h2>Verbesserte Antworten</h2>
-            <div className="cards">{state.improvedResponses.map((item) => <ResponseCard item={item} key={item.anonymousId || item.model} />)}</div>
-          </div>
-          <div className="panel">
-            <h2>Rangliste (Runde 2)</h2>
-            <RankingTable ranking={state.reRanking} caption="Rangliste der zweiten Bewertungsrunde" />
-          </div>
-        </div>
-        <div className="panel">
-          <h2>Re-Reviews</h2>
-          <div className="reviewGrid">{state.reReviews.map((item) => <ReviewCard item={item} key={item.reviewerModel || item.model} />)}</div>
-        </div>
+        <section id="panel-synthesis" role="tabpanel" aria-labelledby="tab-synthesis" hidden={activeTab !== 'synthesis'} className="resultPanel final">
+          <p className="eyebrow">Chairman-Ergebnis</p><h2>Synthese</h2>
+          {state.finalAnswer ? <SafeMarkdown>{state.finalAnswer}</SafeMarkdown> : state.error ? <div className="error" role="alert">{state.error}</div> : <p className="muted">Noch keine Synthese.</p>}
+        </section>
+        <section id="panel-answers" role="tabpanel" aria-labelledby="tab-answers" hidden={activeTab !== 'answers'} className="resultPanel">
+          <div className="sectionHeading"><div><p className="eyebrow">Quellen</p><h2>Einzelantworten</h2></div><span>{selectedAnswers.length}/2 für Vergleich gewählt</span></div>
+          <div className="answerPicker">{state.responses.map((item) => { const id = item.anonymousId || item.model; return <label key={id}><input type="checkbox" checked={selectedAnswers.includes(id)} onChange={() => toggleAnswer(id)} /> {id}</label>; })}</div>
+          {comparison.length === 2 ? <div className="comparison" data-testid="answer-comparison">{comparison.map((item) => <ResponseCard item={item} key={item.anonymousId || item.model} />)}</div> : <div className="cards">{state.responses.map((item) => <ResponseCard item={item} key={item.anonymousId || item.model} />)}</div>}
+        </section>
+        <section id="panel-reviews" role="tabpanel" aria-labelledby="tab-reviews" hidden={activeTab !== 'reviews'} className="resultPanel">
+          <p className="eyebrow">Peer-Review</p><h2>Bewertungen</h2>
+          <div className="rankingGrid"><RankingTable ranking={state.ranking} caption="Rangliste der ersten Bewertungsrunde" />{state.reRanking.length > 0 && <RankingTable ranking={state.reRanking} caption="Rangliste der zweiten Bewertungsrunde" />}</div>
+          <div className="reviewGrid">{state.reviews.map((item) => <ReviewCard item={item} key={item.reviewerModel || item.model} />)}{state.reReviews.map((item) => <ReviewCard item={item} key={`re-${item.reviewerModel || item.model}`} />)}</div>
+        </section>
+        <section id="panel-run-data" role="tabpanel" aria-labelledby="tab-run-data" hidden={activeTab !== 'run-data'} className="resultPanel">
+          <p className="eyebrow">Metadaten</p><h2>Laufdaten</h2>{state.summary ? <Summary summary={state.summary} /> : <p className="muted">Noch keine Laufzusammenfassung verfügbar.</p>}
+        </section>
       </>}
-      <div className="panel final">
-        <h2>Finale Antwort</h2>
-        {state.finalAnswer ? <SafeMarkdown>{state.finalAnswer}</SafeMarkdown> : state.error ? <div className="error" role="alert">{state.error}</div> : <p className="muted">Noch keine Synthese.</p>}
-      </div>
     </section>
   );
 }
@@ -347,7 +427,7 @@ function ResponseCard({ item }) {
 }
 
 function SafeMarkdown({ children }) {
-  return <ReactMarkdown components={{ h1: 'h3', h2: 'h3', h3: 'h4', h4: 'h5', h5: 'h6', h6: 'strong' }}>{children}</ReactMarkdown>;
+  return <div className="markdown"><ReactMarkdown components={{ h1: 'h3', h2: 'h3', h3: 'h3', h4: 'h3', h5: 'h3', h6: 'h3' }}>{children}</ReactMarkdown></div>;
 }
 
 function RankingTable({ ranking, caption }) {
@@ -359,11 +439,29 @@ function ReviewCard({ item }) {
   const review = item.review;
   const label = item.reviewerModel || item.model || 'Review';
   const status = statusText[item.status] || item.status || 'wartet';
-  return <article className="card"><header><strong>{label}</strong><span role={item.status === 'failed' ? 'alert' : 'status'} aria-live={item.status === 'failed' ? 'assertive' : 'polite'} aria-atomic="true" aria-label={`${label}: ${status}`}>{status}</span></header>{review ? <pre>{JSON.stringify(review, null, 2)}</pre> : item.error ? <p className="error">{item.error}</p> : null}</article>;
+  const assessments = review?.responses || review?.assessments || review?.evaluations || [];
+  return <article className="card reviewCard"><header><strong>{label}</strong><span role={item.status === 'failed' ? 'alert' : 'status'} aria-live={item.status === 'failed' ? 'assertive' : 'polite'} aria-atomic="true" aria-label={`${label}: ${status}`}>{status}</span></header>{review ? <>
+    {Array.isArray(assessments) && assessments.map((assessment, index) => <section className="assessment" key={assessment.responseId || index}><h3>{assessment.responseId || `Antwort ${index + 1}`}</h3><ScoreList scores={assessment.scores || assessment.criteria} /><p>{assessment.reasoning || assessment.rationale || assessment.justification}</p>{assessment.strengths?.length > 0 && <details><summary>Stärken</summary><ul>{assessment.strengths.map((value) => <li key={value}>{value}</li>)}</ul></details>}{assessment.weaknesses?.length > 0 && <details><summary>Schwächen</summary><ul>{assessment.weaknesses.map((value) => <li key={value}>{value}</li>)}</ul></details>}</section>)}
+    {(review.ranking || review.finalRanking) && <p><strong>Reihenfolge:</strong> {(review.ranking || review.finalRanking).join(' → ')}</p>}
+    <details className="technical"><summary>Technische Details</summary><pre>{JSON.stringify(review, null, 2)}</pre></details>
+  </> : item.error ? <p className="error" role="alert">{item.error}</p> : null}</article>;
+}
+
+function ScoreList({ scores }) {
+  if (!scores) return null;
+  const entries = Array.isArray(scores) ? scores.map((item) => [item.criterion || item.id, item.score]) : Object.entries(scores);
+  return <dl className="scoreList">{entries.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}/10</dd></div>)}</dl>;
 }
 
 function Summary({ summary }) {
-  return <div className="summary"><span>{summary.durationMs} ms</span><span>{summary.modelCalls} Calls</span><span>{summary.successfulCalls} ok</span><span>{summary.failedCalls} Fehler</span><span>{summary.tokenTotals?.total || 0} Tokens</span></div>;
+  return <dl className="summary"><div><dt>Dauer</dt><dd>{formatDuration(summary.durationMs)}</dd></div><div><dt>Modellaufrufe</dt><dd>{summary.modelCalls}</dd></div><div><dt>Erfolgreich</dt><dd>{summary.successfulCalls}</dd></div><div><dt>Fehler</dt><dd>{summary.failedCalls}</dd></div><div><dt>Tokens</dt><dd>{summary.tokenTotals?.total || 0}</dd></div></dl>;
+}
+
+function formatDuration(ms = 0) {
+  if (ms < 1000) return `${ms} ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds} Sek.`;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} min`;
 }
 
 function deriveRunState(events) {
