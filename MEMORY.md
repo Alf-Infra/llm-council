@@ -35,3 +35,12 @@
 - Kevin hat nach ausgeschöpften zwei regulären Build-Versuchen einen dritten, eng begrenzten Fix für die Fokus-Rückgabe beim Backdrop-Schließen des mobilen Konfigurationsdrawers freigegeben.
 - Gate-Override: Kevin hat am 2026-07-15 Variante B und damit den Deploy trotz rotem finalem Tester-Gate ausdrücklich freigegeben. Akzeptierte Einschränkung: Im mobilen 390-px-Konfigurationsdialog sind Header, Workspace und Skip-Link nicht wirksam `inert`; Desktop ist nicht betroffen, Fokusfalle und Fokus-Rückgabe funktionieren. Dieser Restpunkt wird mit Paket 3 behoben.
 - Deploy: GitHub-Push und PM2-Restart erfolgreich; Produktions-Healthcheck auf Port 3110 grün. Deploy-Commit: `1f897ff`.
+
+### v1.4.1 (2026-07-15)
+
+- Auftrag: Paket 2 vollständig abschließen. Desktop-History wirklich einklappbar machen und die mobile modale Hintergrundisolation für Konfigurations- und History-Drawer wirksam korrigieren.
+- Abgrenzung: Paket 3 bleibt vollständig außen vor. Deployment erst nach neuem grünem Tester- und Reviewer-Gate.
+- Codex-Commit: `e176339`.
+- Ergebnis: Desktop-History klappt vollständig ein und gibt ihre Grid-Breite frei; beide mobilen Drawer setzen und entfernen die Hintergrundisolation wirksam per `inert`, bei erhaltener Fokusfalle, Escape-/Backdrop-Bedienung und exakter Fokus-Rückgabe.
+- Tester-Finale: 24 Backendtests und 19 Playwright/Axe-Tests grün; Produktions-Build, `/health`, Root-Route, Port-Freigabe und alle Reveal-/Export-/Secret-/SSE-Grenzen bestätigt.
+- Reviewer-Finale: Gate grün ohne Concerns; Produktionsregressionen und Umfangsabgrenzung zu Paket 3 unabhängig bestätigt.

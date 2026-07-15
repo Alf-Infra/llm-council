@@ -649,3 +649,75 @@ den letzten Reviewer-Blocker begrenzten Build-Versuch freigegeben.
   Reviews, History-Drawer, Fokusfalle, Hintergrundisolation, Heading-Fix,
   v1.3-Regressionsgrenzen, 24 Backendtests, bestehende 16 Browser/Axe-Tests,
   Reveal/Export/Secret/SSE, Build und HTTP-Smokes dürfen nicht regressieren.
+
+## Iteration v1.4.1 — Paket 2 vollständig abschließen
+
+Kevin hat am 2026-07-15 nach eigener Live-Prüfung den gezielten Abschluss von
+Paket 2 beauftragt. v1.4 bleibt bis zu grünen Tester- und Reviewer-Gates
+produktiv. Diese Iteration behebt ausschließlich die zwei noch offenen Punkte
+aus Paket 2; sämtliche Inhalte aus Paket 3 bleiben Nicht-Ziele.
+
+### 1. Desktop-History wirklich einklappbar machen
+
+- Die linke Conversation-History muss bei Desktop-Viewports ab 1101 px über
+  einen klar beschrifteten, tastaturbedienbaren Schalter ein- und ausgeklappt
+  werden können. Der aktuelle dauerhaft reservierte 248-px-Bereich erfüllt die
+  ursprüngliche Planung nicht.
+- Im eingeklappten Zustand darf die Sidebar weder Layoutbreite reservieren noch
+  fokussierbare oder für assistive Technik aktive Bedienelemente enthalten.
+  Der zentrale Workspace nutzt den freigewordenen Platz.
+- Ein sichtbarer Schalter zum erneuten Öffnen bleibt jederzeit erreichbar und
+  kommuniziert den Zustand mit `aria-expanded` und einer eindeutigen
+  Beschriftung. Beim Schließen darf der Fokus nicht verloren gehen.
+- Mobile History bleibt der bestehende modale Drawer. Desktop-Collapse und
+  Mobile-Drawer dürfen ihre Zustände und Fokus-Auslöser nicht gegenseitig
+  verfälschen.
+- Ergänze eine deterministische Browser-Regression bei 1440 × 1000: History
+  schließen, nachweisen, dass ihre Grid-Breite entfällt und ihre Inhalte nicht
+  fokussierbar/zugänglich sind, Schalter fokussiert beziehungsweise erreichbar
+  bleibt, History wieder öffnen und Zustand sowie Bedienbarkeit bestätigen.
+
+### 2. Mobile modale Hintergrundisolation wirksam machen
+
+- Reproduziere den finalen Tester-Befund in einem frischen Produktions-Build
+  bei 390 × 850: mobilen Konfigurationsdrawer ausschließlich über den sichtbaren
+  Header-Schalter öffnen und danach die tatsächlichen DOM-Attribute sowie
+  `HTMLElement.inert` prüfen.
+- Solange der Konfigurationsdialog offen ist, müssen `header.mobileBar`,
+  `main.workspace`, `.skipLink` und alle sonstigen Hintergrundbereiche
+  nachweislich inert beziehungsweise gleichwertig vollständig aus Fokusfolge
+  und Accessibility-Tree isoliert sein. Der Dialog selbst und sein Backdrop
+  bleiben bedienbar.
+- Verwende eine robuste React-DOM-Abbildung für das boolesche `inert`-Attribut;
+  ein Ausdruck, der im Produktions-DOM zu `null` beziehungsweise
+  `element.inert === false` führt, ist nicht ausreichend.
+- Dasselbe Isolationsprinzip gilt symmetrisch für den mobilen History-Drawer.
+  Initialer Fokus, Tab-/Shift-Tab-Fokusfalle, Escape, Backdrop-Schließen und
+  exakte Fokus-Rückgabe zu beiden mobilen Auslösern bleiben erhalten.
+- Ergänze eine frische Regression bei 390 × 850 für beide Drawer. Sie muss
+  Attribute und DOM-Properties der Hintergrundbereiche prüfen und zusätzlich
+  nachweisen, dass Hintergrundcontrols während des Dialogs nicht per Tastatur
+  erreichbar sind. Nach Schließen muss `inert` vollständig entfernt und der
+  Hintergrund wieder bedienbar sein.
+
+### Abschluss-Gates
+
+- Alle bisherigen 24 Backendtests und 17 Playwright/Axe-Tests bleiben grün.
+- Ergänzte Desktop-Collapse- und Mobile-Isolationsregressionen laufen gegen den
+  gebauten Produktionsstand, nicht nur gegen Quelltextannahmen.
+- `npm run build`, Test-Port 3210, `/health`, Root-Route und Cleanup sind grün.
+- Reveal-/Export-Atomizität, Secret-Redaction, SSE-Abbruch, stabile
+  Modellfokussierung, Heading-Hierarchie, Tabs, Antwortvergleich, strukturierte
+  Reviews und Responsive-Verhalten bei 320/390/430 px regressieren nicht.
+- Nach grünem Tester-Gate ist ein neues unabhängiges Reviewer-Gate für den
+  finalen v1.4.1-Stand verbindlich. Erst danach darf deployed werden.
+
+### Nicht-Ziele
+
+- Kein OpenRouter-Modellkatalog, keine Änderung der Modell-Defaults, keine
+  Presets und keine Vorabvalidierung aller Modelle.
+- Keine Kostenprognose, Budgetgrenzen oder neuen Laufmodi.
+- Keine erweiterte historische Run-Auswahl und kein Kopieren alter
+  Konfigurationen.
+- Keine Änderung an Council-Algorithmus, Prompts, Persistenzschema oder
+  Reveal-Timing.
