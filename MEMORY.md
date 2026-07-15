@@ -26,3 +26,11 @@
 - Ergebnis: Stabile Modellzeilen ohne Fokusverlust; konsistenter History-, Export-, Reset- und Terminalzustand; barrierearme Tastatur-, Formular-, Tabellen-, Phasen- und Live-Status-Semantik; mobile Layouts bei 320/390/430 px ohne Dokumentoverflow.
 - Tester-Finale: 24 Backendtests und 9 Playwright/Axe-Tests grün; Produktions-Build, `/health`, Root-Route, Reveal-Grenzen und Port-Freigabe bestätigt.
 - Reviewer-Finale: Gate grün ohne Concerns; Live-Regionen sind kurz, atomar und angemessen dosiert, Fehler behalten `role="alert"`.
+
+### v1.4 (2026-07-15)
+
+- Auftrag: Paket 2 — visueller und informationeller Umbau zum fokussierten Council Analysis Workspace mit einklappbarer History/Konfiguration, kompakten Ergebnisansichten, Antwortvergleich und strukturierten Reviews.
+- Bündelung: Der nach v1.3 im echten Produktionslauf entdeckte moderate Axe-Fehler `heading-order` wird auf Kevins Wunsch im selben Build-/Test-/Review-Zyklus behoben.
+- Abgrenzung: OpenRouter-Katalog, Presets, Kosten und erweiterte Laufhistorie bleiben Paket 3.
+- Kevin hat nach ausgeschöpften zwei regulären Build-Versuchen einen dritten, eng begrenzten Fix für die Fokus-Rückgabe beim Backdrop-Schließen des mobilen Konfigurationsdrawers freigegeben.
+- Gate-Override: Kevin hat am 2026-07-15 Variante B und damit den Deploy trotz rotem finalem Tester-Gate ausdrücklich freigegeben. Akzeptierte Einschränkung: Im mobilen 390-px-Konfigurationsdialog sind Header, Workspace und Skip-Link nicht wirksam `inert`; Desktop ist nicht betroffen, Fokusfalle und Fokus-Rückgabe funktionieren. Dieser Restpunkt wird mit Paket 3 behoben.

@@ -461,3 +461,191 @@ unabhängige Review fand jedoch einen Accessibility-Blocker:
   Abschluss prüft. Ein reiner Axe-Lauf reicht für dieses Kriterium nicht.
 - Alle bisherigen v1.3-Fixes, 24 Backendtests, 8 Browser-/Axe-Tests,
   Reveal-Grenzen, Build und HTTP-Smokes dürfen nicht regressieren.
+
+## Iteration v1.4 — Paket 2: Design und Informationsarchitektur
+
+Kevin hat am 2026-07-15 Paket 2 beauftragt und ausdrücklich entschieden, die
+kleine noch offene Überschriftenkorrektur aus Paket 1 in denselben Build-,
+Test- und Review-Zyklus aufzunehmen. Ziel ist ein fokussierter, hochwertiger
+„Council Analysis Workspace“ statt der bisherigen langen Debug-Ansicht.
+
+### Verbindliche Restkorrektur aus Paket 1
+
+- Die Markdown-Projektion muss für beliebige von Modellen gelieferte
+  `h1`-bis-`h6`-Folgen eine konsistente Seitenhierarchie erzeugen. Insbesondere
+  dürfen unter einem Ergebnisabschnitt mit `h2` keine `h4` oder tieferen
+  Überschriften ohne dazwischenliegende Ebene entstehen.
+- Der reale Produktionsfehler wird als Browserfixture nachgebildet: eine
+  gespeicherte Antwort enthält mindestens eine Markdown-`###`-Überschrift
+  direkt im Antworttext. Nach Wiederöffnung darf Axe keinen
+  `heading-order`-Verstoß melden. Die Seite behält genau ein App-`h1`.
+
+### Workspace-Layout und visuelle Richtung
+
+- Gestalte die Oberfläche als eigenständigen Analyse-Arbeitsplatz mit klarer
+  visueller Hierarchie, großzügiger lesbarer Typografie, konsistenten
+  Abständen, ruhiger Farbpalette und deutlich unterscheidbaren Zuständen.
+  Keine generische ChatGPT-Kopie und kein bloßes Umfärben der bestehenden
+  Kartenwand.
+- Desktop gliedert sich in:
+  1. eine schmale, einklappbare History-Navigation links;
+  2. einen priorisierten Ergebnis-/Arbeitsbereich in der Mitte;
+  3. eine einklappbare Konfigurationsleiste beziehungsweise einen Drawer für
+     Provider, Modelle, Rollen und Kriterien rechts.
+- Der zentrale Ergebnisbereich erhält eine sinnvolle maximale Lesebreite,
+  ohne Ranking oder Vergleich unnötig einzuengen. Navigation und zentrale
+  Aktionen dürfen bei langen Ergebnissen sinnvoll sticky bleiben.
+- Im leeren Zustand ist die Konfiguration leicht auffindbar. Nach Laufstart
+  beziehungsweise beim Öffnen eines fertigen Laufs wird sie platzsparend
+  eingeklappt, bleibt aber mit eindeutigem „Konfiguration öffnen“-Schalter
+  erreichbar.
+- Mobile verwendet keinen dauerhaft hohen Sidebar-Block: History wird als
+  zugänglicher Drawer geöffnet, Konfiguration als Drawer oder klarer
+  Disclosure-/Akkordeonbereich. Öffnen/Schließen, Escape, Fokusbegrenzung bei
+  modalem Drawer und Fokus-Rückgabe an den Auslöser funktionieren korrekt.
+
+### Ergebnisorientierte Informationsarchitektur
+
+- Während eines Laufs steht der Fortschritt im Vordergrund. Nach einem
+  abgeschlossenen Lauf ist „Synthese“ die standardmäßig aktive Ergebnisansicht
+  und erscheint vor den Detailartefakten.
+- Ergebnisse werden in vier klar beschriftete Ansichten gegliedert:
+  „Synthese“, „Antworten“, „Bewertungen“ und „Laufdaten“. Zusätzlich kann
+  „Antworten“ einen gut erreichbaren Vergleichsmodus enthalten.
+- Die Ansichten verwenden ein korrektes zugängliches Tab-/Panel-Muster oder
+  eine gleichwertig kompakte, semantische Navigation. Bei Tabs müssen
+  Pfeiltasten, Home/End, Enter/Space, `aria-selected`, `aria-controls` und
+  Fokusführung dem erwartbaren Tastaturmuster entsprechen.
+- Nicht aktive Ergebnisansichten sind tatsächlich aus Layout und
+  Accessibility-Tree ausgeblendet. Ein vollständiger gespeicherter Lauf darf
+  nicht mehr alle Antworten, Reviews und Synthese gleichzeitig zu einer über
+  20.000 px langen Seite stapeln.
+- Einzelantworten sind einzeln auswählbar und bieten einen Vergleichsmodus für
+  zwei Antworten nebeneinander. Auf kleinen Viewports fällt der Vergleich
+  lesbar untereinander zurück. Modellname, anonyme ID, Status, Laufzeit und
+  Tokens bleiben nachvollziehbar.
+
+### Strukturierte Bewertungen und Ranglisten
+
+- Reviews werden primär aus dem vorhandenen strukturierten Reviewobjekt als
+  verständliche UI gerendert: Kriterienwerte, Gesamt-/Ranginformation,
+  Begründung, Stärken und Schwächen. Lange Inhalte sind aufklappbar.
+- Das rohe Review-JSON bleibt nur in einem klar als „Technische Details“
+  bezeichneten, standardmäßig geschlossenen `<details>`-Bereich verfügbar.
+- Ranglisten bleiben echte zugängliche Tabellen und zeigen mindestens Rang,
+  Antwort/Modell, gewichteten Score und gültige Stimmen. Soweit die
+  vorhandenen Daten es hergeben, werden Kriterienwerte sowie die Veränderung
+  zwischen Runde 1 und Runde 2 verständlich dargestellt. Fehlende Werte werden
+  ehrlich als nicht verfügbar gekennzeichnet, nicht erfunden.
+- Fortschritt und Phasen zeigen visuell und semantisch „ausstehend“, „läuft“,
+  „abgeschlossen“ und „Fehler“. Der Zustand darf nie allein von Farbe
+  abhängen. Die in v1.3 eingeführten dosierten Live-Regionen bleiben erhalten.
+- Laufdaten formatieren Dauer menschenlesbar (`4:11 min` statt `251431 ms`),
+  Calls, Erfolge/Fehler und Tokens als beschriftete Kennzahlen. Eine
+  Kostenberechnung ist weiterhin Paket 3 und darf hier nicht vorgetäuscht
+  werden.
+
+### Responsive und Accessibility
+
+- Desktopprüfung mindestens bei 1280 × 800 und 1440 × 1000; Mobileprüfung bei
+  320, 390 und 430 CSS-Pixeln. Es entsteht kein horizontaler Dokumentoverflow.
+- Touchziele, Fokusdarstellung, Skip-Link, Labels, Tabellen, Live-Regionen,
+  History-Tastaturbedienung, Modellfokus und Reset-/Exportzustände aus v1.3
+  dürfen nicht regressieren.
+- Drawer, Tabs, Antwortauswahl, Vergleich und aufklappbare Reviewdetails sind
+  vollständig mit Tastatur und Screenreader-Semantik bedienbar.
+- `prefers-reduced-motion` wird respektiert; Animationen sind dezent und für
+  Funktion oder Verständnis nicht erforderlich.
+- Modellinhalte bleiben sicher gerendert. Kein ungefiltertes HTML, kein
+  `dangerouslySetInnerHTML` und keine Aufweichung der Reveal-Grenzen.
+
+### Verbindliche Browser-Regressionen
+
+- Erweitere die Playwright-Suite deterministisch für mindestens:
+  1. aktive Syntheseansicht nach Wiederöffnung eines abgeschlossenen Laufs;
+  2. Tastaturbedienung der vier Ergebnisansichten einschließlich korrekter
+     Tab-/Panel-Semantik;
+  3. Auswahl und Vergleich zweier Antworten;
+  4. strukturierte Reviewdarstellung und standardmäßig geschlossenes Roh-JSON;
+  5. Desktop-Konfigurationsleiste und Mobile-History-/Konfigurationsdrawer
+     einschließlich Escape und Fokus-Rückgabe;
+  6. echte Markdown-`###`-Fixture ohne Axe-`heading-order`-Verstoß;
+  7. 320/390/430 px ohne Dokumentoverflow sowie sinnvolles gestapeltes
+     Vergleichslayout;
+  8. Produktionsähnlicher abgeschlossener Lauf bleibt deutlich kompakter als
+     die bisherige alles gleichzeitig rendernde Ansicht.
+- Axe prüft Initialzustand und vollständigen gespeicherten Lauf. Es sind keine
+  `critical`/`serious`-Verstöße und ausdrücklich kein `heading-order`-Verstoß
+  zulässig.
+- Alle bestehenden 24 Backendtests und 9 v1.3-Browserregressionen bleiben
+  grün oder werden bei bewusst geänderter UI-Semantik gleichwertig angepasst.
+  Anonymisierung, atomisches Reveal, Export-Sperre, Secret-Redaction,
+  `process.env.PORT`, Build, `/health` und Root-Route dürfen nicht regressieren.
+
+### Nicht-Ziele für v1.4
+
+- Noch kein dynamischer OpenRouter-Modellkatalog, keine neuen Modell-Defaults,
+  keine Presets und keine Vorabvalidierung aller ausgewählten Modelle.
+- Noch keine Kostenberechnung oder Budgetgrenzen.
+- Noch keine erweiterte Auswahl einzelner historischer Runs innerhalb einer
+  Conversation und kein „Konfiguration kopieren und erneut ausführen“.
+- Keine Änderung an Council-Algorithmus, Review-Prompts, Aggregation,
+  Verbesserungsschleife, Persistenzschema oder Reveal-Timing.
+
+## Iteration v1.4 — Retry-Kontext: Konfigurationszustand und modale Drawer
+
+Der erste v1.4-Build sowie 24 Backend- und 15 Playwright/Axe-Tests waren grün,
+das unabhängige Review fand jedoch zwei fachliche Blocker:
+
+1. **Desktop-Konfiguration nach Laufstart**
+   - `startRun()` startet den SSE-Lauf, setzt `configOpen` aber nicht zurück.
+   - Klappe die Desktop-Konfiguration beim Laufstart platzsparend ein, ohne die
+     gute Auffindbarkeit im Empty State zu verlieren.
+   - Der eindeutig beschriftete Schalter zum erneuten Öffnen muss erhalten
+     bleiben.
+   - Ergänze eine deterministische Browser-Regression für genau diesen
+     Zustandswechsel.
+
+2. **Vollständige modale Fokusführung der mobilen Drawer**
+   - History- und Konfigurationsdrawer benötigen zugängliche Dialog-/Modal-
+     Semantik oder ein nachweislich gleichwertiges Muster.
+   - Beim Öffnen muss der Fokus sinnvoll in den jeweiligen Drawer wechseln.
+   - Solange er offen ist, bleibt die Tastaturfokussierung vollständig im
+     Drawer; Hintergrund und Backdrop dürfen nicht fokussierbar oder für
+     assistive Technik als aktive Oberfläche erreichbar sein.
+   - Escape und Backdrop schließen weiterhin, danach kehrt der Fokus exakt zum
+     jeweiligen Auslöser zurück.
+   - Ergänze deterministische Focus-Containment-Regressionen für beide Drawer,
+     inklusive initialem Fokus, Vorwärts-/Rückwärts-Tabbing und Fokus-Rückgabe.
+
+Alle bisherigen v1.4-Funktionen und v1.3-Regressionsgrenzen sowie 24 Backend-
+tests, Reveal/Export/Secret/SSE, `process.env.PORT`, Build und HTTP-Smokes
+müssen grün bleiben.
+
+## Iteration v1.4 — ausdrücklich freigegebener Fix-Versuch 3
+
+Kevin hat am 2026-07-15 Option (a) und damit einen dritten, ausschließlich auf
+den letzten Reviewer-Blocker begrenzten Build-Versuch freigegeben.
+
+- Auf einem frischen mobilen Viewport bei 390 px öffnet der Header-Schalter
+  „Konfiguration öffnen“ den modalen Konfigurationsdrawer, ohne den echten
+  Auslöser in `configTriggerRef` festzuhalten.
+- Beim anschließenden Schließen über `.drawerBackdrop` ist der Drawer zwar zu,
+  aber der Fokus fällt auf `document.body`, weil `configTriggerRef.current`
+  `null` ist.
+- Erfasse den tatsächlich verwendeten mobilen Konfigurations-Auslöser vor dem
+  Öffnen zuverlässig und bewahre ihn über den gesamten modalen Lebenszyklus.
+- Nach Backdrop-Schließen muss der Fokus exakt auf denselben sichtbaren
+  Header-Schalter zurückkehren. Escape-Schließen und alle anderen bereits
+  funktionierenden Fokus-Rückgaben müssen erhalten bleiben.
+- Ergänze eine frische deterministische Playwright-Regression bei 390 px:
+  Seite neu laden, Konfigurationsdrawer über den mobilen Header öffnen,
+  initialen Fokus und modale Semantik prüfen, über den Backdrop schließen und
+  anschließend exakten Fokus auf dem auslösenden Header-Schalter verlangen.
+- Der Test muss den vorher fehlenden Backdrop-Pfad prüfen und darf nicht durch
+  einen zuvor verwendeten Desktop-Schalter oder bestehenden Ref-Zustand
+  beeinflusst werden.
+- Der Fix bleibt eng begrenzt. Workspace-Design, Tabs, Vergleich, strukturierte
+  Reviews, History-Drawer, Fokusfalle, Hintergrundisolation, Heading-Fix,
+  v1.3-Regressionsgrenzen, 24 Backendtests, bestehende 16 Browser/Axe-Tests,
+  Reveal/Export/Secret/SSE, Build und HTTP-Smokes dürfen nicht regressieren.
