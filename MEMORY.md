@@ -44,3 +44,15 @@
 - Ergebnis: Desktop-History klappt vollständig ein und gibt ihre Grid-Breite frei; beide mobilen Drawer setzen und entfernen die Hintergrundisolation wirksam per `inert`, bei erhaltener Fokusfalle, Escape-/Backdrop-Bedienung und exakter Fokus-Rückgabe.
 - Tester-Finale: 24 Backendtests und 19 Playwright/Axe-Tests grün; Produktions-Build, `/health`, Root-Route, Port-Freigabe und alle Reveal-/Export-/Secret-/SSE-Grenzen bestätigt.
 - Reviewer-Finale: Gate grün ohne Concerns; Produktionsregressionen und Umfangsabgrenzung zu Paket 3 unabhängig bestätigt.
+
+### v1.5 (2026-07-15)
+
+- Auftrag: Paket 3 — dynamischer OpenRouter-Katalog, gültige Modellkennungen, Presets und 3-/5-Phasenmodi, vollständige Vorabvalidierung, transparente Call-/Kostenprognose, historische Preissnapshots, vollständige Run-Auswahl, Konfigurationsübernahme und flüchtige API-Key-Regeln.
+- Integrationsentscheidung: Modell- und Preisfelder kommen aus den offiziellen OpenRouter-Modellendpunkten; Tests verwenden ausschließlich injizierbare Fixtures und verursachen keine realen Modellkosten.
+- Abgrenzung: Keine weiteren Provider, keine LiteLLM-Schicht, keine Accounts und keine persistierten API-Keys. Paket-1/2-Grenzen bleiben verbindlich.
+- Kevin hat nach rotem Review des zweiten v1.5-Builds einen dritten, eng auf drei Punkte begrenzten Fixversuch freigegeben: stale Katalog blockiert Run-Starts, Aliase werden vor jeder Seiteneffektgrenze kanonisiert und Preissnapshots entstehen ausschließlich aus dem frischen serverseitigen Katalog.
+- Kevin hat nach dem dritten v1.5-Build einen vierten, ausschließlich auf die erneute kanonische Invariantenprüfung begrenzten Fixversuch freigegeben: Alias-Kollisionen dürfen weder doppelte Council-Modelle noch Chairman = Council erzeugen und müssen vor jeder Seiteneffektgrenze mit 422 enden.
+- Codex-Commits: `369fd96`, `c71f739`, `b6da128`, `c520a27`.
+- Ergebnis: Sicherer dynamischer OpenRouter-Katalog mit Fresh-/Stale-Semantik, katalogvalidierte Presets und 3-/5-Phasenmodi, serverautoritativ kanonisierte Auswahl und Preise, transparente Call-/Kostenprognose, stabile historische Preissnapshots, vollständige Run-Auswahl und Konfigurationsübernahme ohne API-Key. Stale oder kanonisch kollidierende Auswahlen enden vor jeder Seiteneffektgrenze mit klarer 503-/422-Semantik.
+- Tester-Finale: 38 Backendtests und 21 Playwright/Axe-Tests grün; Build, HTTP-Smokes, Portbereinigung, Secret-Lebenszyklus, Run-State und alle Paket-1/2-Grenzen bestätigt.
+- Reviewer-Finale: Gate grün ohne Concerns; V15-002 bis V15-004 und die kanonische Auswahl-Invariante sind geschlossen.
