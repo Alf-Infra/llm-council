@@ -90,3 +90,24 @@ test('Axe: Initialzustand und wiedergeöffneter Lauf ohne ernste Verstöße', as
   const reopened = await new AxeBuilder({ page }).analyze();
   expect(reopened.violations.filter((item) => ['critical', 'serious'].includes(item.impact))).toEqual([]);
 });
+
+test('Live-Regionen melden Phasen-, Council-, Modell- und Abschlussstatus gezielt', async ({ page }) => {
+  await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
+
+  const phaseStatus = page.getByTestId('phase-live-status');
+  await expect(phaseStatus).toHaveAttribute('role', 'status');
+  await expect(phaseStatus).toHaveAttribute('aria-live', 'polite');
+  await expect(phaseStatus).toContainText('Aktuelle Phase: 5 Synthese');
+
+  const councilStatus = page.getByTestId('council-live-status');
+  await expect(councilStatus).toHaveAttribute('aria-atomic', 'true');
+  await expect(councilStatus).toContainText('1 von 1 Council-Antworten abgeschlossen');
+
+  const modelStatus = page.getByRole('status', { name: 'Response A: fertig' });
+  await expect(modelStatus).toHaveAttribute('aria-live', 'polite');
+  await expect(modelStatus).toHaveText('fertig');
+
+  const completionStatus = page.getByTestId('run-complete-status');
+  await expect(completionStatus).toHaveAttribute('role', 'status');
+  await expect(completionStatus).toContainText('Council-Lauf abgeschlossen');
+});

@@ -283,12 +283,23 @@ const phases = ['answers', 'reviews', 'improvement', 're_review', 'synthesis'];
 
 function RunView({ state }) {
   const currentIndex = phases.indexOf(state.stage);
+  const completed = Boolean(state.finalAnswer || state.summary);
+  const responseProgress = state.responses.length
+    ? `${state.responses.filter((item) => ['success', 'failed'].includes(item.status)).length} von ${state.responses.length} Council-Antworten abgeschlossen.`
+    : 'Council-Antworten noch nicht gestartet.';
   return (
     <section className="run">
       <h2 className="srOnly">Fortschritt und Ergebnisse</h2>
+      <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="phase-live-status">
+        Aktuelle Phase: {phaseLabels[state.stage] || state.stage}.
+      </p>
+      <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="council-live-status">
+        {responseProgress}
+      </p>
       <ol className="phaseStrip" aria-label="Laufphasen">
         {phases.map((phase, index) => <li className={`${state.stage === phase ? 'phase active' : 'phase'}${index < currentIndex ? ' complete' : ''}`} aria-current={state.stage === phase ? 'step' : undefined} key={phase}><span className="srOnly">{index < currentIndex ? 'Abgeschlossen: ' : state.stage === phase ? 'Aktuell: ' : 'Ausstehend: '}</span>{phaseLabels[phase]}</li>)}
       </ol>
+      {completed && <p className="srOnly" role="status" aria-live="polite" aria-atomic="true" data-testid="run-complete-status">Council-Lauf abgeschlossen. Die finale Phase ist Synthese.</p>}
       {state.summary && <Summary summary={state.summary} />}
       <div className="columns">
         <div className="panel">
@@ -330,7 +341,9 @@ function RunView({ state }) {
 
 function ResponseCard({ item }) {
   const meta = [item.model, `${item.latencyMs ?? '-'} ms`, `${item.usage?.total_tokens ?? item.total_tokens ?? '-'} Tokens`].filter(Boolean).join(' · ');
-  return <article className="card"><header><strong>{item.anonymousId || item.model}</strong><span>{statusText[item.status] || item.status}</span></header><small>{meta}</small><SafeMarkdown>{item.content || item.error || ''}</SafeMarkdown></article>;
+  const label = item.anonymousId || item.model || 'Modellantwort';
+  const status = statusText[item.status] || item.status || 'wartet';
+  return <article className="card"><header><strong>{label}</strong><span role={item.status === 'failed' ? 'alert' : 'status'} aria-live={item.status === 'failed' ? 'assertive' : 'polite'} aria-atomic="true" aria-label={`${label}: ${status}`}>{status}</span></header><small>{meta}</small><SafeMarkdown>{item.content || item.error || ''}</SafeMarkdown></article>;
 }
 
 function SafeMarkdown({ children }) {
@@ -344,7 +357,9 @@ function RankingTable({ ranking, caption }) {
 
 function ReviewCard({ item }) {
   const review = item.review;
-  return <article className="card"><header><strong>{item.reviewerModel || item.model}</strong><span>{statusText[item.status] || item.status}</span></header>{review ? <pre>{JSON.stringify(review, null, 2)}</pre> : <p>{item.error}</p>}</article>;
+  const label = item.reviewerModel || item.model || 'Review';
+  const status = statusText[item.status] || item.status || 'wartet';
+  return <article className="card"><header><strong>{label}</strong><span role={item.status === 'failed' ? 'alert' : 'status'} aria-live={item.status === 'failed' ? 'assertive' : 'polite'} aria-atomic="true" aria-label={`${label}: ${status}`}>{status}</span></header>{review ? <pre>{JSON.stringify(review, null, 2)}</pre> : item.error ? <p className="error">{item.error}</p> : null}</article>;
 }
 
 function Summary({ summary }) {
