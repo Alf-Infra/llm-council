@@ -201,6 +201,24 @@ test('Mobile Drawer sind modal, halten Fokus fest und geben ihn exakt zurück', 
   await expect(configTrigger).toBeFocused();
 });
 
+test('frischer mobiler Konfigurationsdrawer gibt Backdrop-Fokus an den Header-Auslöser zurück', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 850 });
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('LLM Council Analyse');
+
+  const trigger = page.getByTestId('mobile-config-trigger');
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+
+  const drawer = page.getByRole('dialog', { name: 'Laufkonfiguration' });
+  await expect(drawer).toHaveAttribute('aria-modal', 'true');
+  await expect(page.getByRole('button', { name: 'Konfiguration schließen' })).toBeFocused();
+
+  await page.locator('.drawerBackdrop').click({ position: { x: 10, y: 400 } });
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
 test('Markdown-### wahrt genau ein h1 und verletzt die Heading-Reihenfolge nicht', async ({ page }) => {
   await page.getByRole('button', { name: /^Gespeicherte Analyse abgeschlossen$/ }).click();
   await page.getByRole('tab', { name: 'Antworten' }).click();

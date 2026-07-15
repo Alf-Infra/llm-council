@@ -150,13 +150,25 @@ function App() {
     setConfigOpen(true);
   }
 
+  function openDrawer(kind, trigger) {
+    if (kind === 'history') {
+      historyTriggerRef.current = trigger;
+      setHistoryOpen(true);
+    } else {
+      configTriggerRef.current = trigger;
+      setConfigOpen(true);
+    }
+  }
+
   function closeDrawer(kind) {
     if (kind === 'history') {
+      const trigger = historyTriggerRef.current;
       setHistoryOpen(false);
-      requestAnimationFrame(() => historyTriggerRef.current?.focus());
+      requestAnimationFrame(() => trigger?.focus());
     } else {
+      const trigger = configTriggerRef.current;
       setConfigOpen(false);
-      requestAnimationFrame(() => configTriggerRef.current?.focus());
+      requestAnimationFrame(() => trigger?.focus());
     }
   }
 
@@ -279,9 +291,9 @@ function App() {
   return (
     <><a className="skipLink" href="#main-content" inert={modalOpen ? '' : undefined}>Zum Hauptinhalt springen</a><div className={`shell ${configOpen ? '' : 'configCollapsed'}`}>
       <header className="mobileBar" inert={modalOpen ? '' : undefined}>
-        <button ref={historyTriggerRef} className="icon" aria-label="Historie öffnen" aria-expanded={historyOpen} onClick={() => setHistoryOpen(true)}><Menu aria-hidden="true" /></button>
+        <button className="icon" aria-label="Historie öffnen" aria-expanded={historyOpen} onClick={(event) => openDrawer('history', event.currentTarget)}><Menu aria-hidden="true" /></button>
         <strong>LLM Council</strong>
-        <button className="icon" aria-label="Konfiguration öffnen" aria-expanded={configOpen} onClick={(event) => { configTriggerRef.current = event.currentTarget; setConfigOpen(true); }}><PanelRightOpen aria-hidden="true" /></button>
+        <button data-testid="mobile-config-trigger" className="icon" aria-label="Konfiguration öffnen" aria-expanded={configOpen} onClick={(event) => openDrawer('config', event.currentTarget)}><PanelRightOpen aria-hidden="true" /></button>
       </header>
       {modalOpen && <div className="drawerBackdrop" aria-hidden="true" onClick={() => closeDrawer(historyModalOpen ? 'history' : 'config')} />}
       <aside ref={historyDrawerRef} className={`sidebar ${historyOpen ? 'drawerOpen' : ''}`} aria-label="Conversation-Historie" role={historyModalOpen ? 'dialog' : undefined} aria-modal={historyModalOpen ? 'true' : undefined} inert={(viewportWidth <= 760 && !historyOpen) || configModalOpen ? '' : undefined}>
