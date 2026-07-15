@@ -1135,3 +1135,171 @@ bleiben unverändert.
   Caches, der serverseitigen Safe-Field-Projektion oder der Modellvalidierung.
 - Keine neuen Provider, keine Änderung an Council-Orchestrierung, Presets,
   Preisberechnung, API-Key-Lebenszyklus oder Persistenz.
+
+## Iteration v1.5.2 — Chairman erzeugt eine eigenständige Endantwort
+
+Kevin hat am 2026-07-15 beauftragt, die Chairman-Stufe wieder auf das
+eigentliche Ziel des LLM-Council-Prinzips auszurichten: Das Council berät und
+bewertet intern; der Chairman liefert dem Nutzer anschließend die bestmögliche
+eigenständige Antwort auf die Originalfrage. Die aktuelle Tendenz zu einem
+Vergleichsbericht über die beteiligten Modelle ist zu beseitigen.
+
+### Chairman-Auftrag
+
+- Das verbindliche Primärziel des Chairman lautet: Beantworte die ursprüngliche
+  Nutzerfrage direkt und liefere die bestmögliche eigenständige Endantwort.
+  Council-Antworten, Reviews und Rangliste sind ausschließlich internes
+  Arbeitsmaterial.
+- Der Chairman darf überzeugende Inhalte kombinieren, schwächere oder falsche
+  Aussagen verwerfen, Widersprüche eigenständig auflösen, fehlende
+  Schlussfolgerungen ergänzen und die bestplatzierte Antwort verbessern. Die
+  Rangliste ist ein Qualitätssignal, keine bindende Auswahlentscheidung.
+- Die Endantwort muss unmittelbar auf die Nutzerfrage eingehen, ohne Kenntnis
+  des Council-Ablaufs verständlich sein und eine für die Frage angemessene
+  Struktur, Detailtiefe sowie klare Empfehlung oder Schlussfolgerung liefern.
+- Die Endantwort darf Council-Mitglieder nicht einzeln vergleichen, keine
+  Modell-/Providernamen, Ranglisten, Scores oder Peer-Reviews erwähnen und den
+  internen Beratungsprozess nicht beschreiben. Verboten sind insbesondere
+  Meta-Einstiege wie „Die Antworten stimmen darin überein“ sowie Attributionen
+  wie „Laut Modell X“.
+- Inhaltliche Unsicherheit oder mehrere vertretbare Positionen werden nur dann
+  erwähnt, wenn sie zur Sache selbst gehören. Ein bloßer Widerspruch zwischen
+  Kandidaten ist kein Grund, den Vergleich in die Endantwort zu tragen.
+
+### Chairman-Arbeitsmaterial und Anonymisierung
+
+- Der Chairman erhält weiterhin die Originalfrage, alle für die jeweilige
+  Abschlussrunde erfolgreichen Antworten, die dazugehörigen validierten
+  Reviews und die finale aggregierte Rangliste.
+- Im Chairman-Prompt werden Kandidaten ausschließlich mit stabilen anonymen
+  Bezeichnungen wie „Kandidat A“, „Kandidat B“ geführt. Echte Modell- und
+  Providernamen dürfen weder in Antworten, Ranking noch Review-Zusammenfassung
+  des Chairman-Arbeitsmaterials erscheinen. Die UI, Persistenz und Exporte
+  behalten die vollständige Transparenz außerhalb des Chairman-Prompts.
+- Das Promptformat trennt die Originalfrage, einen deutlich als
+  `INTERNES ARBEITSMATERIAL` markierten Bereich und den abschließenden Auftrag
+  `ZU ERSTELLENDE ENDANTWORT`. Kandidatentexte sind als untrusted Daten zu
+  behandeln und dürfen den Systemauftrag nicht überschreiben.
+- Im Standardmodus dienen die Originalantworten, Erst-Reviews und die erste
+  Rangliste als Grundlage. Im iterativen Modus dienen ausschließlich die
+  erfolgreichen verbesserten Antworten, Re-Reviews und die finale Rangliste
+  als primäre Abschlussgrundlage; ein Rückfall auf die alte Runde findet nur
+  nach der bereits bestehenden Orchestrator-Fallbacklogik statt.
+
+### Quellenregeln
+
+- Die bisherige Aufforderung zur Modellattribution wird vollständig entfernt.
+  Modellnamen sind niemals Quellen.
+- In Kandidaten vorhandene echte Quellen oder Links dürfen nur dann in die
+  Endantwort übernommen werden, wenn sie inhaltlich relevant sind. Der
+  Chairman darf keine Quellen, URLs oder Belege erfinden und darf
+  widersprüchliche beziehungsweise nicht belastbare Angaben nicht als sicher
+  darstellen.
+
+### Oberfläche
+
+- Der bisherige Ergebnis-Tab und alle sichtbaren Bezeichnungen „Synthese“ für
+  das fertige Chairman-Ergebnis werden konsistent in „Endantwort“ umbenannt.
+  Interne technische Stage- und Persistenzwerte dürfen zur
+  Rückwärtskompatibilität unverändert bleiben.
+- „Endantwort“ bleibt nach Abschluss und Wiederöffnung der standardmäßig aktive
+  zugängliche Tab. Antworten, Bewertungen und Laufdaten bleiben getrennte
+  Transparenzansichten; es wird kein zusätzlicher Meta-Vergleich in die
+  Endantwort eingeblendet.
+
+### Verbindliche Regressionen und Abnahme
+
+- Unit-Tests instrumentieren den tatsächlichen Chairman-Provideraufruf und
+  belegen: direkter Endantwort-Auftrag vorhanden; „Laut Modell X“ und der alte
+  Vergleichsauftrag entfernt; keine echten Modell- oder Providernamen im
+  Chairman-Arbeitsmaterial; alle Kandidaten, validierten Review-Erkenntnisse
+  und die finale Rangfolge vollständig und anonym zugeordnet.
+- Separate Orchestrator-Regressionen prüfen Standard- und iterativen Modus und
+  belegen, dass jeweils die richtige Antwort-/Review-/Ranking-Generation an den
+  Chairman gelangt. Die bestehenden Fehler-, Reveal-, Persistenz-, Export-,
+  Kosten- und Secret-Grenzen bleiben unverändert.
+- Browser-/Accessibility-Tests prüfen die konsistente Bezeichnung
+  „Endantwort“, den standardmäßig aktiven Tab nach Abschluss und Wiederöffnung,
+  Tastaturbedienung, Heading-Hierarchie und Axe ohne neue Verstöße.
+- Keine Tests führen echte OpenRouter-Katalog- oder kostenpflichtige
+  Modellaufrufe aus. Alle bisherigen 38 Backendtests und 22 Playwright/Axe-
+  Tests, Build, HTTP-Smokes und Paket-1/2/3-Grenzen bleiben grün.
+- Manuelle fachliche Abnahme nach dem Build umfasst drei Szenarien:
+  Wissensfrage mit direkter Antwort, Empfehlung mit klarer begründeter Auswahl
+  und kontroverse Frage mit sachbezogener Unsicherheit. Keine dieser
+  Endantworten darf als Modellvergleich oder Council-Protokoll formuliert sein.
+- Deployment erfolgt ausschließlich nach grünem unabhängigen Tester- und
+  Reviewer-Gate.
+
+### Nicht-Ziele
+
+- Keine Änderung an OpenRouter-Katalog, Modellvalidierung, Alias-
+  Kanonisierung, Presets, Preisberechnung, API-Key-Lebenszyklus, Run-Historie
+  oder bestehender Council-/Review-Parallelisierung.
+- Kein zusätzlicher Chairman, keine neuen Provider und keine kostenpflichtigen
+  Evaluationsaufrufe im Testlauf.
+
+## Iteration v1.5.2 — Retry-Kontext V152-001
+
+Das erste Review fand im Chairman-Arbeitsmaterial weiterhin gewichtete Scores,
+Stimmen und aggregierte Kriterienscores. Diese numerischen Bewertungsartefakte
+können den Chairman unnötig zu einem Vergleichsbericht lenken und werden
+entfernt.
+
+Wichtige Abgrenzung zur unveränderten fachlichen Anforderung:
+
+- Die ursprüngliche v1.5.2-Spezifikation verlangt ausdrücklich, dass der
+  Chairman die finale Rangfolge vollständig, aber anonymisiert erhält. Diese
+  anonymisierte Qualitätsreihenfolge bleibt als internes Signal erhalten.
+- Entfernt werden sämtliche numerischen oder attributierenden Metadaten:
+  gewichtete Scores, Stimmenzahlen, Kriterienscores, Reviewer-/Modellnamen,
+  Response-IDs und einzelne Rangnummern im Text.
+- Review-Erkenntnisse dürfen nur als sachliche, anonymisierte Qualitäts-,
+  Fehler- oder Unsicherheitshinweise ohne Score, Stimme, Rangzahl oder
+  Attribution in das interne Arbeitsmaterial gelangen.
+- Der Prompt muss unmissverständlich festhalten, dass auch die anonymisierte
+  Reihenfolge ausschließlich internes Qualitätskontext ist und niemals als
+  Rangliste, Vergleich oder Council-Metakommentar in der Endantwort erscheint.
+- Regressionen instrumentieren den tatsächlichen Providerprompt: alle
+  Kandidaten und die anonymisierte Reihenfolge sind vollständig vorhanden;
+  numerische Scores, Stimmen, Kriterienscores, Modell-/Providernamen und
+  Response-IDs fehlen vollständig. Die Endantwort bleibt direkt und
+  eigenständig.
+- Standard- und iterativer Modus, drei Offline-Fachszenarien sowie alle 40
+  Backend- und 22 Playwright/Axe-Regressionen bleiben grün. Keine Änderung
+  außerhalb dieser Prompt-Projektion.
+
+## Iteration v1.5.2 — ausdrücklich freigegebener Fix-Versuch 3
+
+Kevin hat am 2026-07-15 Option A und damit einen dritten, ausschließlich auf
+Reviewer-Concern `V152-002` begrenzten Buildversuch freigegeben. Der fachliche
+Chairman-Fix aus Commit `3dc02aa` ist bestätigt und darf nicht erneut verändert
+werden.
+
+### Dauerhafte Offline-Fachszenarien
+
+- Verankere genau drei deterministische, vollständig offline laufende
+  Provider-Regressionen dauerhaft im committed Testbestand:
+  1. Wissensfrage mit unmittelbarer sachlicher Endantwort,
+  2. Empfehlung mit klarer, begründeter Auswahl,
+  3. kontroverse Frage mit sachbezogener Unsicherheit.
+- Jeder Test muss den realen Orchestrator bis zum tatsächlichen Chairman-
+  Provideraufruf und dessen zurückgegebener Endantwort ausführen. Reine
+  Hilfsfunktions-, Promptstring- oder nachträglich vom Tester erzeugte Ad-hoc-
+  Prüfungen reichen nicht.
+- Jede resultierende Endantwort wird positiv auf unmittelbaren Bezug zur
+  Originalfrage und das erwartete Ergebnis des Szenarios geprüft. Zusätzlich
+  wird sie negativ auf Council-, Kandidaten-, Modell-, Provider-, Ranking-,
+  Score-, Review- und Vergleichs-Metakommentare geprüft.
+- Die Tests verwenden ausschließlich lokale deterministische Provider-Doubles,
+  keine Netzwerk-, OpenRouter-Katalog- oder kostenpflichtigen Modellaufrufe.
+- Die Tests müssen im regulären `npm test`-Lauf enthalten, im Repository
+  committed und für Tester sowie Reviewer ohne Sonderbefehle reproduzierbar
+  sein.
+- Produktionscode, Chairman-Prompt, anonymisierte Qualitätsreihenfolge,
+  Standard-/Iterativ-Zuordnung und UI dürfen in diesem Versuch nicht geändert
+  werden, sofern dies nicht zwingend zur Testbarkeit des bereits bestätigten
+  Verhaltens erforderlich ist. Keine Erweiterung außerhalb `V152-002`.
+- Alle bisherigen 40 Backendtests, 22 Playwright/Axe-Tests, Build und
+  HTTP-Smokes bleiben grün. Deployment erst nach neuem unabhängigem Tester-
+  und Reviewer-Gate.

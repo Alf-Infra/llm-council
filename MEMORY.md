@@ -65,3 +65,15 @@
 - Ergebnis: Selbstständig wachsende, responsive Katalogkarten mit klarer Name-/Slug-/Metadatenhierarchie, beschrifteten Input-/Outputpreisen, verständlichem Leerzustand und eindeutigem „Modell hinzufügen“. Die Trefferliste bleibt in 340-px-Rail und mobilem Drawer intern scrollbar und overflow-frei.
 - Tester-Finale: 38 Backendtests und 22 Playwright/Axe-Tests grün; Bounding-Box-, Overflow-, Keyboard- und Axe-Regressionsprüfung sowie Build, HTTP-Smokes und Portbereinigung bestätigt.
 - Reviewer-Finale: Gate grün ohne Concerns; Diff auf UI/Styles/Test begrenzt, alle v1.5- und Paket-1/2-Grenzen unverändert.
+
+### v1.5.2 (2026-07-15)
+
+- Auftrag: Chairman-Stufe so ausrichten, dass sie aus Council-Antworten, Reviews und Ranking eine direkte, eigenständige bestmögliche Endantwort erzeugt statt eines Modellvergleichs.
+- Designentscheidung: Modell- und Providernamen bleiben für die UI transparent, werden im Chairman-Arbeitsmaterial jedoch durch anonyme Kandidatenbezeichnungen ersetzt. Reviews und Ranking dienen ausschließlich als interne Qualitätssignale.
+- Oberfläche: Ergebnisansicht „Synthese“ wird in „Endantwort“ umbenannt; übrige Transparenz-Tabs bleiben erhalten.
+- Abgrenzung: Keine Änderung an Katalog, Validierung, Preisen, Presets, Secrets oder Persistenz. Deployment erst nach grünem Tester- und Reviewer-Gate.
+- Kevin hat nach dem gelben Review des zweiten Builds einen dritten, ausschließlich auf drei dauerhaft committed Offline-Fachszenarien begrenzten Versuch freigegeben. Der bestätigte Chairman-Produktionscode darf dabei nicht erneut verändert werden.
+- Codex-Commits: `0d4c203`, `3dc02aa`, `0652680`.
+- Ergebnis: Der Chairman erhält alle Kandidaten und die vollständige anonymisierte Qualitätsreihenfolge als internes Material, jedoch keine Rangnummern, Scores, Stimmen, IDs oder Modell-/Provider-/Reviewerattributionen. Seine Ausgabe ist eine direkte eigenständige Antwort ohne Council-, Vergleichs- oder Ranking-Metakommentar.
+- Tester-Finale: 43 Backendtests und 22 Playwright/Axe-Tests grün; darin genau drei deterministische Offline-Orchestrator-Regressionen für Wissensfrage, Empfehlung und kontroverse Frage. Build, HTTP-Smokes und Portbereinigung bestätigt.
+- Reviewer-Finale: Gate grün ohne Concerns; Fix-3-Diff ausschließlich in `tests/orchestrator.test.js`, Produktionscode und bestätigte Prompt-Projektion unverändert.
