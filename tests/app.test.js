@@ -261,6 +261,59 @@ test('POST /api/runs rejects a non-canonicalizable model without side effects', 
   }
 });
 
+test('POST /api/runs rejects distinct council aliases resolving to one canonical model before side effects', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-canonical-duplicate-${Date.now()}-${Math.random()}.db`)));
+  let orchestratorCalls = 0;
+  const app = createApp({
+    config: loadRuntimeConfig(), store,
+    catalog: { async validateSelection(ids) {
+      return ids.map((id, index) => ({ requestedId: id, ok: true, canonicalSlug: index < 2 ? 'vendor/shared' : 'vendor/chair', model: { pricing: {} } }));
+    } },
+    provider: { chat: async () => { throw new Error('provider must not be called'); } },
+    orchestrator: { async *run() { orchestratorCalls += 1; yield { type: 'run_complete' }; } }
+  });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(openRouterRunRequest('temporary'))
+    });
+    assert.equal(response.status, 422);
+    assert.match((await response.json()).error, /Council-Modelle.*Alias-Auflösung.*eindeutig/);
+    assert.equal(orchestratorCalls, 0);
+    assert.deepEqual(store.listConversations(), []);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /api/runs rejects chairman alias resolving to a council canonical model before side effects', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-canonical-chair-${Date.now()}-${Math.random()}.db`)));
+  let orchestratorCalls = 0;
+  const app = createApp({
+    config: loadRuntimeConfig(), store,
+    catalog: { async validateSelection(ids) {
+      const canonical = ['vendor/a', 'vendor/b', 'vendor/a'];
+      return ids.map((id, index) => ({ requestedId: id, ok: true, canonicalSlug: canonical[index], model: { pricing: {} } }));
+    } },
+    provider: { chat: async () => { throw new Error('provider must not be called'); } },
+    orchestrator: { async *run() { orchestratorCalls += 1; yield { type: 'run_complete' }; } }
+  });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(openRouterRunRequest('temporary'))
+    });
+    assert.equal(response.status, 422);
+    assert.match((await response.json()).error, /Chairman-Modell.*Alias-Auflösung.*getrennt/);
+    assert.equal(orchestratorCalls, 0);
+    assert.deepEqual(store.listConversations(), []);
+  } finally {
+    server.close();
+  }
+});
+
 test('real SSE client disconnect aborts and persists a running council run', async () => {
   const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`)));
   const provider = {

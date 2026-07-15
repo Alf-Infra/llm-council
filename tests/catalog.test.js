@@ -43,6 +43,19 @@ test('selection validation requires complete available non-expired slugs and res
   assert.equal(results[3].canonicalSlug, 'openai/alpha@stable');
 });
 
+test('run validation forces a fresh catalog refresh instead of trusting a warm cache', async () => {
+  let calls = 0;
+  const catalog = new OpenRouterCatalog({ fetchImpl: async () => {
+    calls += 1;
+    if (calls === 1) return response([model('openai/alpha')]);
+    throw new Error('upstream unavailable');
+  } });
+  await catalog.getModels();
+  const validation = await catalog.validateSelection(['openai/alpha'], { requireFresh: true });
+  assert.equal(calls, 2);
+  assert.equal(validation.stale, true);
+});
+
 test('preset availability, call formulas and price estimates are deterministic', () => {
   assert.deepEqual(callPlan('standard', 3), { mode: 'standard', baseCalls: 7, repairCallsMax: 3 });
   assert.deepEqual(callPlan('iterative', 3), { mode: 'iterative', baseCalls: 13, repairCallsMax: 6 });

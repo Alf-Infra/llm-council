@@ -36,7 +36,7 @@ export class OpenRouterCatalog {
   }
 
   async validateSelection(modelIds, { requireFresh = false } = {}) {
-    const result = await this.getModels();
+    const result = await this.getModels({ refresh: requireFresh });
     const byId = new Map(result.models.flatMap((model) => [[model.id, model], ...(model.canonicalSlug ? [[model.canonicalSlug, model]] : [])]));
     const validation = modelIds.map((requestedId) => {
       const id = String(requestedId || '').trim();

@@ -106,6 +106,10 @@ export function createApp(options = {}) {
     if (!canonicalized) {
       return res.status(422).json({ error: 'Die Modellauswahl konnte nicht eindeutig kanonisiert werden.' });
     }
+    const canonicalConflict = validateCanonicalSelection(canonicalized);
+    if (canonicalConflict) {
+      return res.status(422).json({ error: canonicalConflict });
+    }
 
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
@@ -195,6 +199,17 @@ function canonicalizeRunInput(input, validation) {
     chairmanModel: normalizedRefs.at(-1),
     priceSnapshot
   };
+}
+
+function validateCanonicalSelection(input) {
+  const council = input.councilModels.map((ref) => ref.model);
+  if (new Set(council).size !== council.length) {
+    return 'Council-Modelle müssen nach der Alias-Auflösung eindeutig sein.';
+  }
+  if (council.includes(input.chairmanModel.model)) {
+    return 'Chairman-Modell muss nach der Alias-Auflösung von allen Council-Modellen getrennt sein.';
+  }
+  return null;
 }
 
 function catalogPrice(value) {
