@@ -25,7 +25,10 @@ const completedRun = {
 const catalogModels = [
   { id: 'alpha/model', canonicalSlug: 'alpha/model', name: 'Alpha Reasoner', contextLength: 128000, pricing: { prompt: 0.000001, completion: 0.000002, request: 0 } },
   { id: 'beta/model', canonicalSlug: 'beta/model', name: 'Beta Fast', contextLength: 64000, pricing: { prompt: 0.0000005, completion: 0.000001, request: 0 } },
-  { id: 'chair/model', canonicalSlug: 'chair/model', name: 'Chair Pro', contextLength: 200000, pricing: { prompt: 0.000002, completion: 0.000004, request: 0 } }
+  { id: 'chair/model', canonicalSlug: 'chair/model', name: 'Chair Pro', contextLength: 200000, pricing: { prompt: 0.000002, completion: 0.000004, request: 0 } },
+  { id: 'anthropic/claude-sonnet-4.6-extended-reasoning-preview', canonicalSlug: 'anthropic/claude-sonnet-4.6-extended-reasoning-preview', name: 'Claude Sonnet 4.6 Extended Reasoning Preview', contextLength: 1000000, pricing: { prompt: 0.000003, completion: 0.000015, request: 0 } },
+  { id: 'anthropic/claude-opus-4.6-ultra-long-context-preview', canonicalSlug: 'anthropic/claude-opus-4.6-ultra-long-context-preview', name: 'Claude Opus 4.6 Ultra Long Context Preview', contextLength: 2000000, pricing: { prompt: 0.000005, completion: 0.000025, request: 0 } },
+  { id: 'third-party/claude-compatible-community-model-with-a-very-long-slug', canonicalSlug: 'third-party/claude-compatible-community-model-with-a-very-long-slug', name: 'Claude Compatible Community Model with a Realistically Long Display Name', contextLength: 131072, pricing: { prompt: null, completion: null, request: null } }
 ];
 
 async function mockApi(page, { failInitial = false } = {}) {
@@ -61,7 +64,7 @@ test('Modellkennung behält Fokus und vollständigen Wert', async ({ page }) => 
 
 test('Katalogsuche, Preset und flüchtige API-Key-Löschung funktionieren ohne Browser-Storage', async ({ page }) => {
   await page.getByLabel('Modelle suchen').fill('Beta Fast');
-  const option = page.getByRole('option', { name: /Beta Fast/ });
+  const option = page.getByRole('button', { name: /Beta Fast.*Modell hinzufügen/ });
   await expect(option).toContainText('beta/model');
   await page.getByRole('button', { name: /Schnell/ }).click();
   await expect(page.getByText('5 Basiscalls')).toBeVisible();
@@ -70,6 +73,42 @@ test('Katalogsuche, Preset und flüchtige API-Key-Löschung funktionieren ohne B
   await expect(page.getByLabel('API-Key')).toHaveValue('');
   const storage = await page.evaluate(async () => ({ local: Object.values(localStorage), session: Object.values(sessionStorage), databases: (await indexedDB.databases()).map((item) => item.name) }));
   expect(JSON.stringify(storage)).not.toContain('sk-test-never-store');
+});
+
+test('Katalogtreffer bleiben in schmaler Rail und mobilem Drawer getrennt, lesbar und tastaturbedienbar', async ({ page }) => {
+  const verifyLayout = async () => {
+    await page.getByLabel('Modelle suchen').fill('claude');
+    await expect(page.getByText(`3 von ${catalogModels.length} Treffern sichtbar`)).toBeVisible();
+    const cards = page.locator('.catalogResult');
+    await expect(cards).toHaveCount(3);
+    const boxes = await cards.evaluateAll((nodes) => nodes.map((node) => {
+      const box = node.getBoundingClientRect();
+      const button = node.querySelector('button').getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom, width: box.width, buttonRight: button.right, buttonScrollWidth: node.querySelector('button').scrollWidth, buttonClientWidth: node.querySelector('button').clientWidth };
+    }));
+    for (let index = 1; index < boxes.length; index += 1) expect(boxes[index].top).toBeGreaterThanOrEqual(boxes[index - 1].bottom + 8);
+    for (const box of boxes) expect(box.buttonScrollWidth).toBeLessThanOrEqual(box.buttonClientWidth);
+    const resultsOverflow = await page.locator('.catalogResults').evaluate((node) => node.scrollWidth > node.clientWidth);
+    expect(resultsOverflow).toBe(false);
+    const documentOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+    expect(documentOverflow).toBe(false);
+    const search = page.getByLabel('Modelle suchen');
+    await search.focus();
+    await page.keyboard.press('Tab');
+    const firstAdd = page.getByRole('button', { name: /Claude Sonnet.*Modell hinzufügen/ });
+    await expect(firstAdd).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('input[value="anthropic/claude-sonnet-4.6-extended-reasoning-preview"]')).toBeVisible();
+  };
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await verifyLayout();
+  await page.setViewportSize({ width: 390, height: 850 });
+  await page.reload();
+  await page.getByTestId('mobile-config-trigger').click();
+  await verifyLayout();
+  const axe = await new AxeBuilder({ page }).include('.configRail').analyze();
+  expect(axe.violations.filter((item) => ['critical', 'serious'].includes(item.impact))).toEqual([]);
 });
 
 test('Laufmodus schaltet zugänglich zwischen drei und fünf Phasen', async ({ page }) => {

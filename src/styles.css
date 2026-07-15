@@ -56,9 +56,19 @@ textarea { width:100%; min-height:112px; resize:vertical; border:1px solid #c8cf
 .catalogPanel { border-top:1px solid var(--line); padding-top:14px; margin-top:14px; }
 .catalogPanel h3 { margin:0; font-size:15px; }
 .catalogPanel label { display:grid; gap:5px; font-size:13px; }
-.catalogResults { display:flex; flex-direction:column; gap:5px; max-height:270px; overflow:auto; margin-top:8px; }
-.catalogResults button { height:auto; min-height:52px; align-items:flex-start; flex-direction:column; padding:8px; text-align:left; overflow-wrap:anywhere; }
-.catalogResults button span { font-size:12px; color:#345; }
+.catalogCount { margin:9px 0 0; color:var(--muted); font-size:12px; }
+.catalogResults { display:flex; flex-direction:column; gap:10px; max-height:360px; overflow-y:auto; overflow-x:hidden; margin:8px 0 0; padding:2px 4px 2px 0; list-style:none; scrollbar-gutter:stable; }
+.catalogResult { flex:none; min-width:0; }
+.catalogResult button { width:100%; height:auto; min-height:0; display:flex; align-items:stretch; flex-direction:column; gap:7px; padding:12px; text-align:left; overflow:hidden; border-color:#d4dad6; }
+.catalogResult button:hover { border-color:#8cac9f; background:#f6faf8; }
+.catalogName { color:var(--ink); font-size:14px; font-weight:750; line-height:1.35; overflow-wrap:anywhere; }
+.catalogSlug { color:#36564e; font:12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap:anywhere; word-break:break-word; }
+.catalogMeta { display:grid; grid-template-columns:1fr; gap:6px; margin:2px 0 0; min-width:0; }
+.catalogMeta div { min-width:0; }
+.catalogMeta dt { color:var(--muted); font-size:11px; line-height:1.35; }
+.catalogMeta dd { margin:1px 0 0; color:var(--ink); font-size:12px; line-height:1.4; overflow-wrap:anywhere; }
+.catalogAction { align-self:flex-start; color:var(--accent); font-size:12px; font-weight:750; line-height:1.4; }
+.catalogEmpty { margin:8px 0 0; padding:12px; border:1px dashed #b9c1bc; border-radius:8px; color:var(--muted); font-size:13px; overflow-wrap:anywhere; }
 .presets, .runMode { display:grid; gap:8px; border-top:1px solid var(--line); padding-top:15px; margin-top:16px; }
 .presets button { height:auto; min-height:52px; align-items:flex-start; flex-direction:column; }
 .presets button[aria-pressed="true"] { border-color:var(--accent); background:var(--accent-soft); }

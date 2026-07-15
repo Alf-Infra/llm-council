@@ -380,6 +380,10 @@ function App() {
 
   if (!config) return <main className="boot" id="main-content"><h1>LLM Council</h1>{bootError ? <><div className="error" role="alert">{bootError}</div><button onClick={loadInitial}>Erneut versuchen</button></> : <p role="status">App wird geladen…</p>}</main>;
 
+  const matchingCatalogModels = catalog
+    .filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(catalogQuery.trim().toLowerCase()))
+    .slice(0, 30);
+
   return (
     <><a ref={skipLinkRef} className="skipLink" href="#main-content">Zum Hauptinhalt springen</a><div className={`shell ${configOpen ? '' : 'configCollapsed'} ${desktopHistoryOpen ? '' : 'historyCollapsed'}`}>
       <header ref={mobileBarRef} className="mobileBar">
@@ -433,7 +437,7 @@ function App() {
               <button onClick={testProvider}>Provider testen</button>
             </div>
             {providerStatus && <div className="providerStatus" role="status" aria-live="polite">{providerStatus}</div>}
-            <div className="catalogPanel"><div className="panelHeader"><h3>Modellkatalog</h3><button type="button" onClick={() => loadCatalog(true)}>Aktualisieren</button></div>{catalogStatus.loading ? <p role="status">Katalog wird geladen…</p> : catalogStatus.error ? <div className="error" role="alert">{catalogStatus.error} <button onClick={() => loadCatalog(true)}>Wiederholen</button></div> : <><p role="status">{catalog.length} textfähige Modelle geladen{catalogStatus.stale ? ' (veralteter Cache)' : ''}.</p><label>Modelle suchen<input type="search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Anbieter, Name oder Slug" /></label><div className="catalogResults" role="listbox" aria-label="OpenRouter-Modelle">{catalog.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(catalogQuery.toLowerCase())).slice(0, 30).map((item) => <button type="button" role="option" aria-selected="false" key={item.id} onClick={() => setModels([...models, makeModel(item.id)])}><strong>{item.name}</strong><span>{item.id}</span><small>{item.contextLength ? `${item.contextLength.toLocaleString('de-DE')} Kontext` : 'Kontext n/v'} · {formatPrice(item.pricing)}</small></button>)}</div></>}</div>
+            <div className="catalogPanel"><div className="panelHeader"><h3>Modellkatalog</h3><button type="button" onClick={() => loadCatalog(true)}>Aktualisieren</button></div>{catalogStatus.loading ? <p role="status">Katalog wird geladen…</p> : catalogStatus.error ? <div className="error" role="alert">{catalogStatus.error} <button onClick={() => loadCatalog(true)}>Wiederholen</button></div> : <><p role="status">{catalog.length} textfähige Modelle geladen{catalogStatus.stale ? ' (veralteter Cache)' : ''}.</p><label>Modelle suchen<input type="search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Anbieter, Name oder Slug" /></label>{catalogQuery.trim() && <p className="catalogCount" role="status" aria-live="polite">{matchingCatalogModels.length} von {catalog.length} Treffern sichtbar</p>}{matchingCatalogModels.length > 0 ? <ul className="catalogResults" aria-label="OpenRouter-Modelle">{matchingCatalogModels.map((item) => <li className="catalogResult" key={item.id}><button type="button" aria-label={`${item.name} (${item.id}) – Modell hinzufügen`} onClick={() => setModels([...models, makeModel(item.id)])}><span className="catalogName">{item.name}</span><span className="catalogSlug">{item.id}</span><dl className="catalogMeta"><div><dt>Kontextfenster</dt><dd>{item.contextLength ? `${item.contextLength.toLocaleString('de-DE')} Token` : 'nicht verfügbar'}</dd></div><div><dt>Inputpreis / 1 Mio. Token</dt><dd>{formatCatalogPrice(item.pricing?.prompt)}</dd></div><div><dt>Outputpreis / 1 Mio. Token</dt><dd>{formatCatalogPrice(item.pricing?.completion)}</dd></div></dl><span className="catalogAction">Modell hinzufügen</span></button></li>)}</ul> : <p className="catalogEmpty">Keine Modelle entsprechen der Suche „{catalogQuery}“.</p>}</>}</div>
             <fieldset className="presets"><legend>Presets</legend>{presets.map((preset) => <button type="button" key={preset.id} disabled={!preset.available} aria-pressed={presetId === preset.id} onClick={() => applyPreset(preset)}><strong>{preset.label}</strong><span>{preset.mode === 'standard' ? '3 Phasen' : '5 Phasen'} · {preset.available ? 'verfügbar' : 'Modell fehlt'}</span></button>)}</fieldset>
             <fieldset className="runMode"><legend>Laufmodus</legend><label><input type="radio" name="mode" checked={mode === 'standard'} onChange={() => { setMode('standard'); setPresetId(null); }} /> Standard (3 Phasen)</label><label><input type="radio" name="mode" checked={mode === 'iterative'} onChange={() => { setMode('iterative'); setPresetId(null); }} /> Iterativ (5 Phasen)</label><RunPreview mode={mode} models={models} selectedCouncil={selectedCouncil} chairmanModel={chairmanModel} catalog={catalog} /></fieldset>
             <fieldset className="modelList"><legend>Modelle und Rollen</legend>
@@ -593,9 +597,8 @@ function RunPreview({ mode, models, selectedCouncil, chairmanModel, catalog }) {
   return <div className="runPreview" role="status"><strong>Laufvorschau</strong><span>{council.length} Council-Modelle · {calls} Basiscalls</span><span>JSON-Reparaturen: bis zu {council.length * (mode === 'iterative' ? 2 : 1)} zusätzliche Calls</span><span>Kostenprognose: {estimate == null ? 'nicht verfügbar (Preise fehlen)' : `ca. ${formatUsd(estimate)}`}</span><details><summary>Annahmen</summary><span>Je Antwortrunde 1.500/1.200, je Review 5.000/900 und Chairman 8.000/1.800 Prompt-/Ausgabetokens. Reparaturcalls sind nicht eingerechnet.</span></details></div>;
 }
 
-function formatPrice(pricing) {
-  if (pricing?.prompt == null || pricing?.completion == null) return 'Preis n/v';
-  return `$${(pricing.prompt * 1_000_000).toFixed(2)} / $${(pricing.completion * 1_000_000).toFixed(2)} je 1 Mio. Token`;
+function formatCatalogPrice(value) {
+  return value == null || !Number.isFinite(Number(value)) ? 'nicht verfügbar' : `$${(Number(value) * 1_000_000).toFixed(2)}`;
 }
 
 function formatUsd(value) { return `$${Number(value).toFixed(value < 0.01 ? 4 : 2)}`; }
