@@ -13,6 +13,9 @@ const statusText = {
   aborted: 'abgebrochen'
 };
 
+let modelSequence = 0;
+const makeModel = (value) => ({ id: `model-${++modelSequence}`, value });
+
 function App() {
   const [config, setConfig] = useState(null);
   const [conversations, setConversations] = useState([]);
@@ -21,26 +24,38 @@ function App() {
   const [providerBaseUrl, setProviderBaseUrl] = useState('https://openrouter.ai/api/v1');
   const [providerApiKey, setProviderApiKey] = useState('');
   const [providerStatus, setProviderStatus] = useState('');
-  const [models, setModels] = useState(['gpt-5.5', 'gpt-5.4', 'claude-sonnet-4-6', 'gemini-3-pro-preview']);
-  const [selectedCouncil, setSelectedCouncil] = useState(['gpt-5.5', 'gpt-5.4']);
-  const [chairmanModel, setChairmanModel] = useState('claude-sonnet-4-6');
+  const [models, setModels] = useState([]);
+  const [selectedCouncil, setSelectedCouncil] = useState([]);
+  const [chairmanModel, setChairmanModel] = useState('');
   const [criteria, setCriteria] = useState([]);
   const [events, setEvents] = useState([]);
   const [currentRunId, setCurrentRunId] = useState(null);
   const [error, setError] = useState('');
+  const [bootError, setBootError] = useState('');
   const abortRef = useRef(null);
   const running = Boolean(abortRef.current);
 
-  useEffect(() => {
-    Promise.all([fetch('/api/config').then((r) => r.json()), fetch('/api/conversations').then((r) => r.json())]).then(([cfg, list]) => {
+  async function loadInitial() {
+    setBootError('');
+    try {
+      const responses = await Promise.all([fetch('/api/config'), fetch('/api/conversations')]);
+      if (responses.some((response) => !response.ok)) throw new Error('Konfiguration oder Historie konnte nicht geladen werden.');
+      const [cfg, list] = await Promise.all(responses.map((response) => response.json()));
+      const initialModels = cfg.defaults.map(makeModel);
       setConfig(cfg);
       setProviderBaseUrl(cfg.openRouterDefaultBaseUrl || 'https://openrouter.ai/api/v1');
-      setModels(cfg.defaults);
-      setSelectedCouncil(cfg.defaults.slice(0, 2));
-      setChairmanModel(cfg.defaults[2] || cfg.defaults[0]);
+      setModels(initialModels);
+      setSelectedCouncil(initialModels.slice(0, 2).map((item) => item.id));
+      setChairmanModel(initialModels[2]?.id || initialModels[0]?.id || '');
       setCriteria(cfg.criteria.map((item) => ({ ...item, enabled: true, weight: item.defaultWeight })));
       setConversations(list.conversations || []);
-    });
+    } catch (err) {
+      setBootError(err.message || 'Die App konnte nicht geladen werden.');
+    }
+  }
+
+  useEffect(() => {
+    loadInitial();
   }, []);
 
   const state = useMemo(() => deriveRunState(events), [events]);
@@ -51,34 +66,48 @@ function App() {
   }
 
   async function openConversation(id) {
-    setSelectedConversation(id);
-    const data = await fetch(`/api/conversations/${id}`).then((r) => r.json());
-    const latest = data.conversation.runs?.[0];
-    if (latest) setEvents(historyToEvents(latest));
+    try {
+      const response = await fetch(`/api/conversations/${id}`);
+      if (!response.ok) throw new Error('Conversation konnte nicht geöffnet werden.');
+      const data = await response.json();
+      const runs = data.conversation.runs || [];
+      const latest = runs.reduce((newest, run) => !newest || String(run.started_at || '') > String(newest.started_at || '') ? run : newest, null);
+      setSelectedConversation(id);
+      setCurrentRunId(latest?.id || null);
+      setEvents(latest ? historyToEvents(latest) : []);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function newConversation() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setSelectedConversation(null);
+    setCurrentRunId(null);
+    setEvents([]);
+    setQuestion('');
+    setError('');
+    setProviderStatus('');
   }
 
   function addModel() {
-    const next = `model-${models.length + 1}`;
-    setModels([...models, next]);
+    setModels([...models, makeModel(`model-${models.length + 1}`)]);
   }
 
-  function updateModel(index, value) {
-    const next = [...models];
-    const old = next[index];
-    next[index] = value;
-    setModels(next);
-    setSelectedCouncil(selectedCouncil.map((m) => (m === old ? value : m)));
-    if (chairmanModel === old) setChairmanModel(value);
+  function updateModel(id, value) {
+    setModels(models.map((model) => model.id === id ? { ...model, value } : model));
   }
 
-  function removeModel(model) {
-    setModels(models.filter((m) => m !== model));
-    setSelectedCouncil(selectedCouncil.filter((m) => m !== model));
-    if (chairmanModel === model) setChairmanModel('');
+  function removeModel(id) {
+    setModels(models.filter((model) => model.id !== id));
+    setSelectedCouncil(selectedCouncil.filter((modelId) => modelId !== id));
+    if (chairmanModel === id) setChairmanModel('');
   }
 
-  function toggleCouncil(model) {
-    setSelectedCouncil(selectedCouncil.includes(model) ? selectedCouncil.filter((m) => m !== model) : [...selectedCouncil, model]);
+  function toggleCouncil(id) {
+    setSelectedCouncil(selectedCouncil.includes(id) ? selectedCouncil.filter((modelId) => modelId !== id) : [...selectedCouncil, id]);
   }
 
   function modelRef(model) {
@@ -96,7 +125,7 @@ function App() {
 
   function validate() {
     const activeCriteria = criteria.filter((item) => item.enabled);
-    const trimmedModels = models.map((m) => m.trim()).filter(Boolean);
+    const trimmedModels = models.map((m) => m.value.trim()).filter(Boolean);
     const problems = [];
     if (!question.trim()) problems.push('Bitte eine Frage eingeben.');
     if (!providerBaseUrl.trim()) problems.push('Bitte eine OpenRouter Base URL angeben.');
@@ -109,7 +138,7 @@ function App() {
   }
 
   async function testProvider() {
-    const model = selectedCouncil[0] || models.find(Boolean);
+    const model = models.find((item) => item.id === selectedCouncil[0]) || models[0];
     if (!model || !providerBaseUrl.trim()) {
       setProviderStatus('Bitte Base URL und mindestens ein Modell angeben.');
       return;
@@ -119,7 +148,7 @@ function App() {
       const response = await fetch('/api/provider/test', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(modelRef(model))
+      body: JSON.stringify(modelRef(model.value))
       });
       const body = await response.json();
       setProviderStatus(body.ok ? `Verbindung ok (${body.latencyMs ?? '-'} ms).` : body.error || 'Provider-Test fehlgeschlagen.');
@@ -145,8 +174,8 @@ function App() {
         body: JSON.stringify({
           question,
           conversationId: selectedConversation,
-          councilModels: selectedCouncil.map(modelRef),
-          chairmanModel: modelRef(chairmanModel),
+          councilModels: selectedCouncil.map((id) => modelRef(models.find((item) => item.id === id)?.value || '')),
+          chairmanModel: modelRef(models.find((item) => item.id === chairmanModel)?.value || ''),
           criteria: criteria.filter((item) => item.enabled).map(({ id, weight }) => ({ id, weight }))
         }),
         signal: controller.signal
@@ -176,35 +205,37 @@ function App() {
     await refreshConversations();
   }
 
-  if (!config) return <div className="boot">LLM Council</div>;
+  if (!config) return <main className="boot" id="main-content"><h1>LLM Council</h1>{bootError ? <><div className="error" role="alert">{bootError}</div><button onClick={loadInitial}>Erneut versuchen</button></> : <p role="status">App wird geladen…</p>}</main>;
 
   return (
-    <div className="shell">
+    <><a className="skipLink" href="#main-content">Zum Hauptinhalt springen</a><div className="shell">
       <aside className="sidebar">
-        <div className="brand">LLM Council</div>
-        <button className="new" onClick={() => { setSelectedConversation(null); setEvents([]); setQuestion(''); }}>Neue Conversation</button>
+        <div className="brand" aria-hidden="true">LLM Council</div>
+        <button className="new" onClick={newConversation}>Neue Conversation</button>
         <div className="history">
           {conversations.map((item) => (
-            <div className={item.id === selectedConversation ? 'historyItem active' : 'historyItem'} key={item.id} onClick={() => openConversation(item.id)}>
-              <div className="historyContent">
+            <div className={item.id === selectedConversation ? 'historyItem active' : 'historyItem'} key={item.id}>
+              <button className="historyContent" onClick={() => openConversation(item.id)} aria-current={item.id === selectedConversation ? 'page' : undefined}>
                 <span>{item.title}</span>
                 <small>{statusText[item.latest_status] || item.latest_status || 'bereit'}</small>
-              </div>
-              <button className="icon deleteConv" onClick={(e) => { e.stopPropagation(); if (confirm('Conversation endgültig löschen?')) { fetch(`/api/conversations/${item.id}`, { method: 'DELETE' }).then(() => { if (selectedConversation === item.id) { setSelectedConversation(null); setEvents([]); } refreshConversations(); }); } }} title="Löschen"><Trash2 size={14} /></button>
+              </button>
+              <button className="icon deleteConv" onClick={() => { if (confirm('Conversation endgültig löschen?')) { fetch(`/api/conversations/${item.id}`, { method: 'DELETE' }).then(() => { if (selectedConversation === item.id) newConversation(); refreshConversations(); }); } }} aria-label={`Conversation „${item.title}“ löschen`}><Trash2 size={14} aria-hidden="true" /></button>
             </div>
           ))}
         </div>
       </aside>
 
-      <main className="workspace">
+      <main className="workspace" id="main-content">
+        <h1>LLM Council Analyse</h1>
         <section className="composer">
-          <textarea value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Frage an das Council..." />
+          <label htmlFor="question">Frage an das Council</label>
+          <textarea id="question" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Was soll das Council analysieren?" />
           <div className="actions">
             <button className="primary" disabled={running} onClick={startRun}><Play size={16} /> Lauf starten</button>
             <button disabled={!running} onClick={cancelRun}><PauseCircle size={16} /> Abbrechen</button>
             {currentRunId && <a className="linkButton" href={`/api/runs/${currentRunId}/export.md`}><Download size={16} /> Export</a>}
           </div>
-          {error && <div className="error">{error}</div>}
+          {error && <div className="error" role="alert">{error}</div>}
         </section>
 
         <section className="configGrid">
@@ -215,34 +246,35 @@ function App() {
               <label>API-Key<input type="password" value={providerApiKey} onChange={(e) => setProviderApiKey(e.target.value)} autoComplete="off" placeholder="sk-or-..." /></label>
               <button onClick={testProvider}>Provider testen</button>
             </div>
-            {providerStatus && <div className="providerStatus">{providerStatus}</div>}
-            <div className="modelList">
+            {providerStatus && <div className="providerStatus" role="status" aria-live="polite">{providerStatus}</div>}
+            <fieldset className="modelList"><legend>Modelle und Rollen</legend>
               {models.map((model, index) => (
-                <div className="modelRow" key={`${model}-${index}`}>
-                  <input value={model} onChange={(e) => updateModel(index, e.target.value)} />
-                  <label><input type="checkbox" checked={selectedCouncil.includes(model)} onChange={() => toggleCouncil(model)} /> Council</label>
-                  <label><input type="radio" name="chairman" checked={chairmanModel === model} onChange={() => setChairmanModel(model)} /> Chairman</label>
-                  <button className="icon" onClick={() => removeModel(model)} title="Modell entfernen"><Trash2 size={16} /></button>
+                <div className="modelRow" key={model.id}>
+                  <label className="srOnly" htmlFor={`model-${model.id}`}>Modellkennung {index + 1}</label>
+                  <input id={`model-${model.id}`} value={model.value} onChange={(e) => updateModel(model.id, e.target.value)} />
+                  <label><input type="checkbox" checked={selectedCouncil.includes(model.id)} onChange={() => toggleCouncil(model.id)} /> Council</label>
+                  <label><input type="radio" name="chairman" checked={chairmanModel === model.id} onChange={() => setChairmanModel(model.id)} /> Chairman</label>
+                  <button className="icon" onClick={() => removeModel(model.id)} aria-label={`Modell ${index + 1} entfernen`}><Trash2 size={16} aria-hidden="true" /></button>
                 </div>
               ))}
-            </div>
+            </fieldset>
           </div>
 
           <div className="panel">
             <h2>Kriterien</h2>
-            {criteria.map((item) => (
+            <fieldset className="criteria"><legend>Bewertungskriterien und Gewichtung</legend>{criteria.map((item) => (
               <div className="criterion" key={item.id}>
                 <label><input type="checkbox" checked={item.enabled} onChange={(e) => setCriteria(criteria.map((c) => c.id === item.id ? { ...c, enabled: e.target.checked } : c))} /> {item.label}</label>
-                <input type="range" min="0.5" max="3" step="0.5" value={item.weight} onChange={(e) => setCriteria(criteria.map((c) => c.id === item.id ? { ...c, weight: Number(e.target.value) } : c))} />
+                <label className="srOnly" htmlFor={`weight-${item.id}`}>Gewichtung für {item.label}</label><input id={`weight-${item.id}`} type="range" min="0.5" max="3" step="0.5" value={item.weight} onChange={(e) => setCriteria(criteria.map((c) => c.id === item.id ? { ...c, weight: Number(e.target.value) } : c))} />
                 <span>{item.weight}</span>
               </div>
-            ))}
+            ))}</fieldset>
           </div>
         </section>
 
         <RunView state={state} runId={currentRunId} />
       </main>
-    </div>
+    </div></>
   );
 }
 
@@ -250,11 +282,13 @@ const phaseLabels = { answers: '1 Antworten', reviews: '2 Peer-Review', improvem
 const phases = ['answers', 'reviews', 'improvement', 're_review', 'synthesis'];
 
 function RunView({ state }) {
+  const currentIndex = phases.indexOf(state.stage);
   return (
     <section className="run">
-      <div className="phaseStrip">
-        {phases.map((phase) => <div className={state.stage === phase ? 'phase active' : 'phase'} key={phase}>{phaseLabels[phase]}</div>)}
-      </div>
+      <h2 className="srOnly">Fortschritt und Ergebnisse</h2>
+      <ol className="phaseStrip" aria-label="Laufphasen">
+        {phases.map((phase, index) => <li className={`${state.stage === phase ? 'phase active' : 'phase'}${index < currentIndex ? ' complete' : ''}`} aria-current={state.stage === phase ? 'step' : undefined} key={phase}><span className="srOnly">{index < currentIndex ? 'Abgeschlossen: ' : state.stage === phase ? 'Aktuell: ' : 'Ausstehend: '}</span>{phaseLabels[phase]}</li>)}
+      </ol>
       {state.summary && <Summary summary={state.summary} />}
       <div className="columns">
         <div className="panel">
@@ -263,7 +297,7 @@ function RunView({ state }) {
         </div>
         <div className="panel">
           <h2>Rangliste (Runde 1)</h2>
-          <table><tbody>{state.ranking.map((item) => <tr key={item.responseId}><td>{item.rank}</td><td>{item.responseId}<small>{item.model}</small></td><td>{item.weightedScore}</td><td>{item.validVotes} Stimmen</td></tr>)}</tbody></table>
+          <RankingTable ranking={state.ranking} caption="Rangliste der ersten Bewertungsrunde" />
         </div>
       </div>
       <div className="panel">
@@ -278,7 +312,7 @@ function RunView({ state }) {
           </div>
           <div className="panel">
             <h2>Rangliste (Runde 2)</h2>
-            <table><tbody>{state.reRanking.map((item) => <tr key={item.responseId}><td>{item.rank}</td><td>{item.responseId}<small>{item.model}</small></td><td>{item.weightedScore}</td><td>{item.validVotes} Stimmen</td></tr>)}</tbody></table>
+            <RankingTable ranking={state.reRanking} caption="Rangliste der zweiten Bewertungsrunde" />
           </div>
         </div>
         <div className="panel">
@@ -288,7 +322,7 @@ function RunView({ state }) {
       </>}
       <div className="panel final">
         <h2>Finale Antwort</h2>
-        {state.finalAnswer ? <ReactMarkdown>{state.finalAnswer}</ReactMarkdown> : state.error ? <div className="error">{state.error}</div> : <p className="muted">Noch keine Synthese.</p>}
+        {state.finalAnswer ? <SafeMarkdown>{state.finalAnswer}</SafeMarkdown> : state.error ? <div className="error" role="alert">{state.error}</div> : <p className="muted">Noch keine Synthese.</p>}
       </div>
     </section>
   );
@@ -296,7 +330,16 @@ function RunView({ state }) {
 
 function ResponseCard({ item }) {
   const meta = [item.model, `${item.latencyMs ?? '-'} ms`, `${item.usage?.total_tokens ?? item.total_tokens ?? '-'} Tokens`].filter(Boolean).join(' · ');
-  return <article className="card"><header><strong>{item.anonymousId || item.model}</strong><span>{statusText[item.status] || item.status}</span></header><small>{meta}</small><ReactMarkdown>{item.content || item.error || ''}</ReactMarkdown></article>;
+  return <article className="card"><header><strong>{item.anonymousId || item.model}</strong><span>{statusText[item.status] || item.status}</span></header><small>{meta}</small><SafeMarkdown>{item.content || item.error || ''}</SafeMarkdown></article>;
+}
+
+function SafeMarkdown({ children }) {
+  return <ReactMarkdown components={{ h1: 'h3', h2: 'h3', h3: 'h4', h4: 'h5', h5: 'h6', h6: 'strong' }}>{children}</ReactMarkdown>;
+}
+
+function RankingTable({ ranking, caption }) {
+  if (!ranking.length) return <p className="muted">Noch keine Rangliste verfügbar.</p>;
+  return <div className="tableScroll"><table><caption>{caption}</caption><thead><tr><th scope="col">Rang</th><th scope="col">Antwort</th><th scope="col">Score</th><th scope="col">Stimmen</th></tr></thead><tbody>{ranking.map((item) => <tr key={item.responseId}><td>{item.rank}</td><td>{item.responseId}<small>{item.model}</small></td><td>{item.weightedScore}</td><td>{item.validVotes}</td></tr>)}</tbody></table></div>;
 }
 
 function ReviewCard({ item }) {
@@ -359,7 +402,8 @@ function deriveRunState(events) {
 }
 
 function historyToEvents(run) {
-  const events = [{ type: 'stage', stage: run.stage }];
+  const terminalStage = run.final_answer || run.chairman_error || ['completed', 'chairman_failed'].includes(run.status) ? 'synthesis' : run.stage;
+  const events = [{ type: 'stage', stage: terminalStage }];
   const r1Responses = (run.responses || []).filter((r) => !r.round || r.round === 1);
   const r2Responses = (run.responses || []).filter((r) => r.round === 2);
   const r1Reviews = (run.reviews || []).filter((r) => !r.round || r.round === 1);
@@ -378,6 +422,7 @@ function historyToEvents(run) {
   }
   if (run.final_answer) events.push({ type: 'final', finalAnswer: run.final_answer, summary: run.summary });
   if (run.chairman_error) events.push({ type: 'chairman_failed', error: run.chairman_error, summary: run.summary });
+  events.push({ type: 'stage', stage: terminalStage });
   return events;
 }
 

@@ -12,3 +12,5 @@ data/
 .test-result.json
 .review-result.json
 .deploy-result.json
+test-results/
+playwright-report/
