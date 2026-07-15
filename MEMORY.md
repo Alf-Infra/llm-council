@@ -17,3 +17,12 @@
 - Codex-Commit: `1ad121f`
 - Tester-Finale: 24/24 Tests gruen, Build gruen, `/health`, Root-Route, `/api/config`, Validierungsfehler und Secret-Redaction geprueft.
 - Reviewer-Finale: Gate gruen ohne Concerns; Provider-Kontext, Reveal-Grenzen, `process.env.PORT` und fehlende Secret-Persistenz bestaetigt.
+
+### v1.3 (2026-07-15)
+
+- Auftrag: Paket 1 der Weiterentwicklung — bestätigte Stabilitäts-, Responsive- und Accessibility-Fehler beheben und verbindliche Frontend-Regressionstests einführen.
+- Abgrenzung: Noch kein visuelles Redesign und keine OpenRouter-Katalog-/Preset-/Kosten-Erweiterungen; diese folgen nach separater Prüfung in Paket 2 und 3.
+- Codex-Commits: `6c91408`, `223d80c`.
+- Ergebnis: Stabile Modellzeilen ohne Fokusverlust; konsistenter History-, Export-, Reset- und Terminalzustand; barrierearme Tastatur-, Formular-, Tabellen-, Phasen- und Live-Status-Semantik; mobile Layouts bei 320/390/430 px ohne Dokumentoverflow.
+- Tester-Finale: 24 Backendtests und 9 Playwright/Axe-Tests grün; Produktions-Build, `/health`, Root-Route, Reveal-Grenzen und Port-Freigabe bestätigt.
+- Reviewer-Finale: Gate grün ohne Concerns; Live-Regionen sind kurz, atomar und angemessen dosiert, Fehler behalten `role="alert"`.

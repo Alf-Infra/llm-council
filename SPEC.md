@@ -349,3 +349,115 @@ Nicht-Ziele fuer v1.2:
 - Keine Speicherung von API-Keys im Browser-LocalStorage oder Backend.
 - Keine automatische Modellkatalog-Synchronisierung von OpenRouter; die
   Modellliste bleibt frei editierbar.
+
+## Iteration v1.3 — Paket 1: Stabilität und Accessibility
+
+Kevin hat am 2026-07-15 Paket 1 der geplanten Weiterentwicklung beauftragt.
+Diese Iteration behebt ausschließlich die beim UI-Audit bestätigten
+Funktions-, Responsive- und Accessibility-Fehler und führt verbindliche
+Frontend-Regressionstests ein. Design-Neuordnung und inhaltliche
+OpenRouter-Erweiterungen folgen in separaten Paketen.
+
+### Funktionsfehler
+
+- Modellzeilen benötigen dauerhaft stabile, vom editierbaren Modelltext
+  unabhängige IDs/React-Keys. Beim Tippen mehrerer einzelner Zeichen muss der
+  Fokus im selben Eingabefeld bleiben und der vollständige Text korrekt
+  übernommen werden.
+- Hinzufügen, Bearbeiten, Rollenwechsel und Entfernen von Modellen müssen auch
+  bei ähnlichen oder vorübergehend doppelten Eingaben kontrolliert funktionieren.
+- Beim Öffnen einer gespeicherten Conversation muss der neueste Lauf mitsamt
+  korrekter `currentRunId` geladen werden. Ein vollständiger enthüllter Lauf
+  zeigt den Export dieses Laufs; ein alter oder fremder Export-Link darf nicht
+  stehen bleiben.
+- Ein abgeschlossener Lauf zeigt die Synthese als abgeschlossene/aktuelle
+  Endphase. Beim Rekonstruieren der History dürfen ältere Review-Events den
+  persistierten Terminalzustand nicht überschreiben.
+- „Neue Conversation“ setzt Conversation-, Run-, Export-, Fehler- und
+  Ergebniszustand konsistent zurück.
+- Fehler beim initialen Laden von Config oder History ergeben eine
+  verständliche Fehleransicht mit Wiederholen-Möglichkeit statt eines
+  permanenten Bootscreens.
+
+### Accessibility
+
+- Die Seite besitzt genau eine sinnvolle App-Hauptüberschrift und eine
+  nachvollziehbare Überschriftenhierarchie. Markdown-Überschriften aus
+  Modellantworten dürfen keine zusätzlichen Seiten-`h1` erzeugen.
+- Frage, jede Modellkennung und jeder Gewichtungsregler erhalten eindeutige,
+  programmgesteuert verknüpfte Labels. Council-/Chairman-Auswahl und Kriterien
+  verwenden passende `fieldset`-/`legend`- oder gleichwertige Semantik.
+- Conversation-Einträge sind vollständig per Tastatur aktivierbar. Der
+  Löschen-Button hat einen eindeutigen zugänglichen Namen und ist bei
+  Tastaturfokus sichtbar; keine verschachtelten interaktiven Elemente.
+- Fehler nutzen `role="alert"`; Provider- und Laufstatus verwenden angemessen
+  dosierte `role="status"`-/`aria-live`-Semantik. Laufende Fortschritte,
+  Fehler und Abschluss sind nicht ausschließlich über Farbe erkennbar.
+- Die Phasenanzeige ist semantisch als Fortschrittsfolge ausgezeichnet und
+  kennzeichnet aktuelle sowie abgeschlossene Schritte verständlich.
+- Ranglisten besitzen Caption, Spaltenüberschriften und korrekte
+  Tabellenstruktur. Leere Ranglisten dürfen als verständlicher Empty State
+  statt als semantisch leere Tabelle erscheinen.
+- Es gibt gut sichtbare `:focus-visible`-Stile für alle interaktiven Elemente
+  sowie eine Skip-Link-Möglichkeit zum Hauptinhalt. Icon-Buttons erreichen auf
+  Touch-Layouts mindestens 44 × 44 CSS-Pixel.
+- Bereits gute Sicherheitsgrenzen, Textkontraste und Secret-Redaction dürfen
+  nicht regressieren.
+
+### Responsive Stabilität
+
+- Bei 320, 390 und 430 CSS-Pixeln entsteht kein horizontaler Seitenoverflow.
+- Die fünf Phasen bleiben auf Mobile vollständig lesbar und bedienbar, ohne
+  die Seite künstlich auf Desktopbreite zu zwingen.
+- Modellzeilen, Kriterien, Aktionsbuttons, Sidebar/History, Tabellen und lange
+  Modelltexte bleiben auf Mobile nutzbar. Lange Inhalte dürfen innerhalb
+  ihrer Komponente umbrechen oder kontrolliert komponentenintern scrollen.
+
+### Verbindliche Regressionstests
+
+- Ergänze echte Browser-/Frontendtests, vorzugsweise mit Playwright, für:
+  1. mehrere Zeichen nacheinander in einer Modellkennung bei durchgehendem
+     Fokus und korrekt erhaltenem Wert;
+  2. vollständige Tastaturbedienung der Conversation-History;
+  3. Wiederöffnung eines abgeschlossenen Laufs mit korrekter Endphase und
+     korrektem Export-Link;
+  4. Reset über „Neue Conversation“ ohne veralteten Export-/Run-Zustand;
+  5. Viewports 320, 390 und 430 px ohne horizontalen Dokumentoverflow.
+- Ergänze automatisierte Accessibility-Checks mit Axe oder einem
+  gleichwertigen etablierten Prüfer für mindestens Initialzustand und
+  wiedergeöffneten abgeschlossenen Lauf. Kritische oder ernste Verstöße
+  (`critical`/`serious`) sind nicht zulässig.
+- Tests dürfen keine echten Provideraufrufe oder API-Keys benötigen und müssen
+  deterministisch gegen lokale/mocked Daten laufen.
+- Alle bestehenden 24 Backendtests, Anonymisierungs-/Reveal-Grenzen,
+  `npm run build`, `process.env.PORT`, `/health`, Root-Route und sichere
+  Config-Projektion bleiben grün.
+
+### Nicht-Ziele für v1.3
+
+- Noch kein neues Workspace-Layout, Ergebnis-Tabs, Configuration-Drawer oder
+  visuelles Redesign aus Paket 2.
+- Noch kein OpenRouter-Modellkatalog, neue Modell-Defaults, Presets,
+  Kostenberechnung oder erweiterte Laufhistorie aus Paket 3.
+- Keine Änderung an Council-Algorithmen, Review-Prompts, Aggregation,
+  Anonymisierung oder Reveal-Timing, außer soweit ein UI-Projektionsfehler
+  zwingend korrigiert werden muss.
+
+## Iteration v1.3 — Retry-Kontext: zugängliche Live-Status
+
+Der erste v1.3-Build und alle 32 automatisierten Tests waren grün, das
+unabhängige Review fand jedoch einen Accessibility-Blocker:
+
+- Die laufenden Council- und Phasenstatus in `RunView`, `ResponseCard` und
+  `ReviewCard` werden nur als normale Texte ausgegeben. Fortschritt,
+  Modellfehler und Abschluss werden Screenreadern dadurch nicht zuverlässig
+  angekündigt.
+- Ergänze angemessen dosierte `role="status"`-/`aria-live`-Semantik, ohne bei
+  jedem kleinen Render unnötig den gesamten Bereich erneut anzukündigen.
+- Fehler behalten beziehungsweise erhalten `role="alert"`; laufender
+  Fortschritt und Abschluss müssen als Statusänderungen zugänglich sein.
+- Ergänze eine gezielte deterministische Browser-Regression, welche die
+  Live-Region-Semantik für Council-/Phasenfortschritt, Modellstatus und
+  Abschluss prüft. Ein reiner Axe-Lauf reicht für dieses Kriterium nicht.
+- Alle bisherigen v1.3-Fixes, 24 Backendtests, 8 Browser-/Axe-Tests,
+  Reveal-Grenzen, Build und HTTP-Smokes dürfen nicht regressieren.
