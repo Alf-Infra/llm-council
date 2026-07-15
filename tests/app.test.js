@@ -161,6 +161,106 @@ test('POST /api/runs starts only after the complete catalog selection is valid',
   }
 });
 
+test('POST /api/runs rejects stale catalog validation before every side effect', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-stale-${Date.now()}-${Math.random()}.db`)));
+  let orchestratorCalls = 0;
+  const catalog = {
+    async validateSelection(ids, options) {
+      assert.deepEqual(options, { requireFresh: true });
+      const results = ids.map((id) => ({ requestedId: id, ok: true, canonicalSlug: id, model: { pricing: {} } }));
+      Object.defineProperty(results, 'stale', { value: true });
+      return results;
+    }
+  };
+  const app = createApp({
+    config: loadRuntimeConfig(), store, catalog,
+    provider: { chat: async () => { throw new Error('provider must not be called'); } },
+    orchestrator: { async *run() { orchestratorCalls += 1; yield { type: 'run_complete' }; } }
+  });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(openRouterRunRequest('temporary'))
+    });
+    assert.equal(response.status, 503);
+    assert.equal(orchestratorCalls, 0);
+    assert.deepEqual(store.listConversations(), []);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /api/runs canonicalizes every model and creates prices only from server catalog data', async () => {
+  let receivedInput;
+  const serverPrices = [
+    { prompt: 0.000001, completion: 0.000002, request: 0.01 },
+    { prompt: 0.000003, completion: null, request: 0 },
+    { prompt: 0.000004, completion: 0.000005, request: null }
+  ];
+  const canonical = ['vendor/a-stable', 'vendor/b-stable', 'vendor/chair-stable'];
+  const catalog = {
+    async validateSelection(ids) {
+      const results = ids.map((requestedId, index) => ({ requestedId, ok: true, canonicalSlug: canonical[index], model: { pricing: serverPrices[index] } }));
+      Object.defineProperty(results, 'catalogTimestamp', { value: '2026-07-15T12:00:00.000Z' });
+      return results;
+    }
+  };
+  const app = createApp({
+    dbPath: path.join(os.tmpdir(), `llm-council-canonical-${Date.now()}-${Math.random()}.db`),
+    config: loadRuntimeConfig(), catalog,
+    provider: { chat: async () => { throw new Error('unused'); } },
+    orchestrator: { async *run(input) { receivedInput = input; yield { type: 'run_complete', runId: 'canonical-run' }; } }
+  });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  try {
+    const request = openRouterRunRequest('temporary');
+    request.priceSnapshot = {
+      'openrouter/a': { prompt: 999, completion: 999, request: 999, apiKey: 'client-price-secret' },
+      'vendor/a-stable': { prompt: 888 }
+    };
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request)
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.deepEqual(receivedInput.councilModels.map((item) => item.model), canonical.slice(0, 2));
+    assert.equal(receivedInput.chairmanModel.model, canonical[2]);
+    assert.deepEqual(receivedInput.priceSnapshot['vendor/a-stable'], {
+      canonicalSlug: 'vendor/a-stable', prompt: 0.000001, completion: 0.000002, request: 0.01,
+      capturedAt: '2026-07-15T12:00:00.000Z', currency: 'USD', unit: 'per_token_and_request'
+    });
+    assert.equal(receivedInput.priceSnapshot['vendor/b-stable'].completion, null);
+    assert.doesNotMatch(JSON.stringify(receivedInput.priceSnapshot), /999|888|client-price-secret/);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /api/runs rejects a non-canonicalizable model without side effects', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-no-canonical-${Date.now()}-${Math.random()}.db`)));
+  let orchestratorCalls = 0;
+  const app = createApp({
+    config: loadRuntimeConfig(), store,
+    catalog: { async validateSelection(ids) { return ids.map((id, index) => ({ requestedId: id, ok: true, canonicalSlug: index === 1 ? null : id })); } },
+    provider: { chat: async () => { throw new Error('provider must not be called'); } },
+    orchestrator: { async *run() { orchestratorCalls += 1; yield { type: 'run_complete' }; } }
+  });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(openRouterRunRequest('temporary'))
+    });
+    assert.equal(response.status, 422);
+    assert.equal(orchestratorCalls, 0);
+    assert.deepEqual(store.listConversations(), []);
+  } finally {
+    server.close();
+  }
+});
+
 test('real SSE client disconnect aborts and persists a running council run', async () => {
   const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`)));
   const provider = {

@@ -80,9 +80,12 @@ export function createApp(options = {}) {
     ];
     let modelValidation;
     try {
-      modelValidation = await catalog.validateSelection(selectedModels);
+      modelValidation = await catalog.validateSelection(selectedModels, { requireFresh: true });
     } catch (_error) {
-      return res.status(502).json({ error: 'Modellvalidierung ist derzeit nicht verfügbar.' });
+      return res.status(503).json({ error: 'Für den Lauf ist ein frischer OpenRouter-Modellkatalog erforderlich.' });
+    }
+    if (modelValidation.stale) {
+      return res.status(503).json({ error: 'Für den Lauf ist ein frischer OpenRouter-Modellkatalog erforderlich.' });
     }
     if (modelValidation.length !== selectedModels.length || modelValidation.some((item) => !item.ok)) {
       return res.status(422).json({
@@ -97,6 +100,11 @@ export function createApp(options = {}) {
           };
         })
       });
+    }
+
+    const canonicalized = canonicalizeRunInput(normalized.value, modelValidation);
+    if (!canonicalized) {
+      return res.status(422).json({ error: 'Die Modellauswahl konnte nicht eindeutig kanonisiert werden.' });
     }
 
     res.writeHead(200, {
@@ -115,7 +123,7 @@ export function createApp(options = {}) {
     });
 
     try {
-      for await (const event of orchestrator.run(normalized.value, controller.signal)) {
+      for await (const event of orchestrator.run(canonicalized, controller.signal)) {
         runId = event.runId || runId;
         if (runId) controllers.set(runId, controller);
         writeSse(res, event);
@@ -158,6 +166,39 @@ export function createApp(options = {}) {
   app.use(express.static(clientDir));
   app.get('*', (_req, res) => res.sendFile(path.join(clientDir, 'index.html')));
   return app;
+}
+
+function canonicalizeRunInput(input, validation) {
+  const refs = [...input.councilModels, input.chairmanModel];
+  if (validation.length !== refs.length) return null;
+  const normalizedRefs = refs.map((ref, index) => {
+    const canonical = String(validation[index]?.canonicalSlug || '').trim();
+    if (!validation[index]?.ok || !canonical) return null;
+    return { ...ref, model: canonical, key: `${ref.provider.id}:${ref.provider.baseUrl}:${canonical}` };
+  });
+  if (normalizedRefs.some((ref) => !ref)) return null;
+  const priceSnapshot = Object.fromEntries(normalizedRefs.map((ref, index) => {
+    const pricing = validation[index]?.model?.pricing || {};
+    return [ref.model, {
+      canonicalSlug: ref.model,
+      prompt: catalogPrice(pricing.prompt),
+      completion: catalogPrice(pricing.completion),
+      request: catalogPrice(pricing.request),
+      capturedAt: validation.catalogTimestamp || new Date().toISOString(),
+      currency: 'USD',
+      unit: 'per_token_and_request'
+    }];
+  }));
+  return {
+    ...input,
+    councilModels: normalizedRefs.slice(0, -1),
+    chairmanModel: normalizedRefs.at(-1),
+    priceSnapshot
+  };
+}
+
+function catalogPrice(value) {
+  return value != null && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
 }
 
 export function projectConversationForBrowser(conversation) {

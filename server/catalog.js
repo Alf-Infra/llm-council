@@ -35,10 +35,10 @@ export class OpenRouterCatalog {
     }
   }
 
-  async validateSelection(modelIds) {
+  async validateSelection(modelIds, { requireFresh = false } = {}) {
     const result = await this.getModels();
     const byId = new Map(result.models.flatMap((model) => [[model.id, model], ...(model.canonicalSlug ? [[model.canonicalSlug, model]] : [])]));
-    return modelIds.map((requestedId) => {
+    const validation = modelIds.map((requestedId) => {
       const id = String(requestedId || '').trim();
       const model = byId.get(id);
       let error = null;
@@ -47,6 +47,11 @@ export class OpenRouterCatalog {
       else if (model.expiresAt && Date.parse(model.expiresAt) <= this.now()) error = 'Modell ist abgelaufen.';
       return { requestedId: id, ok: !error, error, canonicalSlug: model?.canonicalSlug || model?.id || null, model: model || null };
     });
+    Object.defineProperties(validation, {
+      stale: { value: Boolean(result.stale), enumerable: false },
+      catalogTimestamp: { value: this.cache ? new Date(this.cache.loadedAt).toISOString() : null, enumerable: false }
+    });
+    return validation;
   }
 }
 
