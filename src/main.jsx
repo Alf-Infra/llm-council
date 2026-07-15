@@ -34,10 +34,13 @@ function App() {
   const [bootError, setBootError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(true);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const historyTriggerRef = useRef(null);
   const configTriggerRef = useRef(null);
   const historyDrawerRef = useRef(null);
   const configDrawerRef = useRef(null);
+  const historyCloseRef = useRef(null);
+  const configCloseRef = useRef(null);
   const abortRef = useRef(null);
   const running = Boolean(abortRef.current);
 
@@ -64,13 +67,18 @@ function App() {
     loadInitial();
   }, []);
 
+  const historyModalOpen = historyOpen && viewportWidth <= 760;
+  const configModalOpen = configOpen && viewportWidth <= 1100;
+  const modalOpen = historyModalOpen || configModalOpen;
+
   useEffect(() => {
-    if (!historyOpen && !configOpen) return undefined;
-    const drawer = historyOpen ? historyDrawerRef.current : window.matchMedia('(max-width: 1100px)').matches ? configDrawerRef.current : null;
+    if (!modalOpen) return undefined;
+    const drawer = historyModalOpen ? historyDrawerRef.current : configDrawerRef.current;
+    const initialFocus = historyModalOpen ? historyCloseRef.current : configCloseRef.current;
+    requestAnimationFrame(() => initialFocus?.focus());
     const handleKeys = (event) => {
       if (event.key === 'Escape') {
-        if (historyOpen) closeDrawer('history');
-        else if (drawer) closeDrawer('config');
+        closeDrawer(historyModalOpen ? 'history' : 'config');
         return;
       }
       if (event.key !== 'Tab' || !drawer) return;
@@ -83,7 +91,13 @@ function App() {
     };
     document.addEventListener('keydown', handleKeys);
     return () => document.removeEventListener('keydown', handleKeys);
-  }, [historyOpen, configOpen]);
+  }, [modalOpen, historyModalOpen]);
+
+  useEffect(() => {
+    const updateWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 760px)');
@@ -219,6 +233,7 @@ function App() {
     }
     setError('');
     setEvents([]);
+    setConfigOpen(false);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -262,15 +277,15 @@ function App() {
   if (!config) return <main className="boot" id="main-content"><h1>LLM Council</h1>{bootError ? <><div className="error" role="alert">{bootError}</div><button onClick={loadInitial}>Erneut versuchen</button></> : <p role="status">App wird geladen…</p>}</main>;
 
   return (
-    <><a className="skipLink" href="#main-content">Zum Hauptinhalt springen</a><div className={`shell ${configOpen ? '' : 'configCollapsed'}`}>
-      <header className="mobileBar">
+    <><a className="skipLink" href="#main-content" inert={modalOpen ? '' : undefined}>Zum Hauptinhalt springen</a><div className={`shell ${configOpen ? '' : 'configCollapsed'}`}>
+      <header className="mobileBar" inert={modalOpen ? '' : undefined}>
         <button ref={historyTriggerRef} className="icon" aria-label="Historie öffnen" aria-expanded={historyOpen} onClick={() => setHistoryOpen(true)}><Menu aria-hidden="true" /></button>
         <strong>LLM Council</strong>
         <button className="icon" aria-label="Konfiguration öffnen" aria-expanded={configOpen} onClick={(event) => { configTriggerRef.current = event.currentTarget; setConfigOpen(true); }}><PanelRightOpen aria-hidden="true" /></button>
       </header>
-      {(historyOpen || configOpen) && <button className="drawerBackdrop" aria-label="Drawer schließen" onClick={() => historyOpen ? closeDrawer('history') : closeDrawer('config')} />}
-      <aside ref={historyDrawerRef} className={`sidebar ${historyOpen ? 'drawerOpen' : ''}`} aria-label="Conversation-Historie">
-        <div className="asideHeading"><div className="brand" aria-hidden="true">LLM Council</div><button className="icon drawerClose" aria-label="Historie schließen" onClick={() => closeDrawer('history')}><X aria-hidden="true" /></button></div>
+      {modalOpen && <div className="drawerBackdrop" aria-hidden="true" onClick={() => closeDrawer(historyModalOpen ? 'history' : 'config')} />}
+      <aside ref={historyDrawerRef} className={`sidebar ${historyOpen ? 'drawerOpen' : ''}`} aria-label="Conversation-Historie" role={historyModalOpen ? 'dialog' : undefined} aria-modal={historyModalOpen ? 'true' : undefined} inert={(viewportWidth <= 760 && !historyOpen) || configModalOpen ? '' : undefined}>
+        <div className="asideHeading"><div className="brand" aria-hidden="true">LLM Council</div><button ref={historyCloseRef} className="icon drawerClose" aria-label="Historie schließen" onClick={() => closeDrawer('history')}><X aria-hidden="true" /></button></div>
         <button className="new" onClick={newConversation}>Neue Conversation</button>
         <div className="history">
           {conversations.map((item) => (
@@ -285,7 +300,7 @@ function App() {
         </div>
       </aside>
 
-      <main className="workspace" id="main-content">
+      <main className="workspace" id="main-content" inert={modalOpen ? '' : undefined}>
         <div className="workspaceHeading"><div><p className="eyebrow">Council Analysis Workspace</p><h1>LLM Council Analyse</h1></div><button className="configToggle" aria-expanded={configOpen} onClick={(event) => { configTriggerRef.current = event.currentTarget; setConfigOpen(!configOpen); }}><PanelRightOpen size={17} aria-hidden="true" /> {configOpen ? 'Konfiguration schließen' : 'Konfiguration öffnen'}</button></div>
         <section className="composer">
           <label htmlFor="question">Frage an das Council</label>
@@ -301,8 +316,8 @@ function App() {
         <RunView state={state} runId={currentRunId} />
       </main>
 
-      <aside ref={configDrawerRef} className={`configRail ${configOpen ? 'drawerOpen' : ''}`} aria-label="Laufkonfiguration">
-        <div className="asideHeading"><div><p className="eyebrow">Einstellungen</p><h2>Konfiguration</h2></div><button className="icon drawerClose" aria-label="Konfiguration schließen" onClick={() => closeDrawer('config')}><X aria-hidden="true" /></button></div>
+      <aside ref={configDrawerRef} className={`configRail ${configOpen ? 'drawerOpen' : ''}`} aria-label="Laufkonfiguration" role={configModalOpen ? 'dialog' : undefined} aria-modal={configModalOpen ? 'true' : undefined} inert={(viewportWidth <= 1100 && !configOpen) || historyModalOpen ? '' : undefined}>
+        <div className="asideHeading"><div><p className="eyebrow">Einstellungen</p><h2>Konfiguration</h2></div><button ref={configCloseRef} className="icon drawerClose" aria-label="Konfiguration schließen" onClick={() => closeDrawer('config')}><X aria-hidden="true" /></button></div>
         <section className="configStack">
           <div className="configSection">
             <div className="panelHeader"><h2>OpenRouter</h2><button className="icon" onClick={addModel} title="Modell hinzufügen"><Plus size={16} /></button></div>

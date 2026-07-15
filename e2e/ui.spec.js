@@ -148,20 +148,55 @@ test('Reviews sind strukturiert, technische Details standardmäßig geschlossen'
   await expect(page.locator('.technical pre')).not.toBeVisible();
 });
 
-test('Desktop-Konfiguration und mobile Drawer schließen per Escape mit Fokus-Rückgabe', async ({ page }) => {
+test('Desktop-Konfiguration klappt beim Laufstart ein und bleibt wieder erreichbar', async ({ page }) => {
+  await page.route('**/api/runs', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/event-stream',
+    body: 'data: {"type":"run_complete","runId":"run-live","stage":"synthesis"}\n\n'
+  }));
+  await page.getByLabel('Frage an das Council').fill('Analysiere diese Frage.');
+  await expect(page.getByRole('complementary', { name: 'Laufkonfiguration' })).toBeVisible();
+  await page.getByRole('button', { name: 'Lauf starten' }).click();
+  await expect(page.getByRole('complementary', { name: 'Laufkonfiguration' })).toBeHidden();
+  const reopen = page.getByRole('button', { name: 'Konfiguration öffnen' }).last();
+  await expect(reopen).toBeVisible();
+  await reopen.click();
+  await expect(page.getByRole('complementary', { name: 'Laufkonfiguration' })).toBeVisible();
+});
+
+test('Mobile Drawer sind modal, halten Fokus fest und geben ihn exakt zurück', async ({ page }) => {
   const desktopToggle = page.getByRole('button', { name: 'Konfiguration schließen' });
   await desktopToggle.click();
   await expect(page.getByRole('complementary', { name: 'Laufkonfiguration' })).toBeHidden();
   await page.setViewportSize({ width: 390, height: 850 });
   const historyTrigger = page.getByRole('button', { name: 'Historie öffnen' });
   await historyTrigger.click();
-  await expect(page.getByRole('complementary', { name: 'Conversation-Historie' })).toBeVisible();
+  const historyDrawer = page.getByRole('dialog', { name: 'Conversation-Historie' });
+  await expect(historyDrawer).toHaveAttribute('aria-modal', 'true');
+  const historyClose = page.getByRole('button', { name: 'Historie schließen' });
+  await expect(historyClose).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: /Conversation.*löschen/ })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(historyClose).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(historyTrigger).toBeFocused();
-  const backdrop = page.getByRole('button', { name: 'Drawer schließen' });
-  if (await backdrop.isVisible()) await backdrop.click();
+  await historyTrigger.click();
+  const backdrop = page.locator('.drawerBackdrop');
+  await expect(backdrop).toHaveAttribute('aria-hidden', 'true');
+  await expect(backdrop).not.toHaveAttribute('tabindex', '0');
+  await backdrop.click({ position: { x: 380, y: 400 } });
+  await expect(historyTrigger).toBeFocused();
   const configTrigger = page.getByRole('button', { name: 'Konfiguration öffnen' }).first();
   await configTrigger.click();
+  const configDrawer = page.getByRole('dialog', { name: 'Laufkonfiguration' });
+  await expect(configDrawer).toHaveAttribute('aria-modal', 'true');
+  const configClose = page.getByRole('button', { name: 'Konfiguration schließen' });
+  await expect(configClose).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByLabel('Gewichtung für Praxisnutzen')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(configClose).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(configTrigger).toBeFocused();
 });
