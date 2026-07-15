@@ -227,6 +227,82 @@ test('iterative chairman material uses only improved answers, re-reviews and fin
   assert.doesNotMatch(prompt, /ALTE ANTWORT|begruendung|vendor\/alpha-model|vendor\/beta-model|Response [AB]|gewichteter Score|gültige Stimmen|aggregierte Kriterien|correctness|depth|usefulness|\b[12]\. Kandidat/);
 });
 
+const forbiddenChairmanMeta = /\b(?:Council|Kandidat(?:en)?|Modell(?:e|en)?|Provider|Ranking|Rangliste|Scores?|Reviews?|Vergleich(?:sbericht|en|e)?)\b/i;
+
+async function runOfflineChairmanScenario({ question, answers, finalAnswer }) {
+  const dbPath = path.join(os.tmpdir(), `llm-council-chair-scenario-${Date.now()}-${Math.random()}.db`);
+  const store = new CouncilStore(createDb(dbPath));
+  const review = reviewJson(['Response A', 'Response B']);
+  const provider = new FakeProvider({
+    'local/answer-one': [answers[0], review],
+    'local/answer-two': [answers[1], review],
+    'local/chairman': [finalAnswer]
+  });
+  const orchestrator = new CouncilOrchestrator({ provider, store, randomSeedFactory: () => 'offline-scenario' });
+  const events = [];
+
+  for await (const event of orchestrator.run({
+    question,
+    councilModels: ['local/answer-one', 'local/answer-two'],
+    chairmanModel: 'local/chairman',
+    criteria,
+    mode: 'standard'
+  }, new AbortController().signal)) events.push(event);
+
+  const chairmanCall = provider.calls.find((call) => call.model === 'local/chairman');
+  const finalEvent = events.find((event) => event.type === 'final');
+  assert.ok(chairmanCall, 'der reale Orchestrator muss den Chairman-Provider aufrufen');
+  assert.ok(finalEvent, 'der Orchestrator muss die Chairman-Antwort als finales Event liefern');
+  assert.equal(finalEvent.finalAnswer, finalAnswer);
+  assert.equal(store.getRun(finalEvent.runId).final_answer, finalAnswer);
+  assert.doesNotMatch(finalAnswer, forbiddenChairmanMeta);
+  return finalAnswer;
+}
+
+test('offline chairman scenario answers a knowledge question directly', async () => {
+  const question = 'Was ist die Hauptstadt von Australien?';
+  const answer = await runOfflineChairmanScenario({
+    question,
+    answers: [
+      'Canberra ist die Hauptstadt Australiens.',
+      'Australiens Hauptstadt ist Canberra, nicht Sydney oder Melbourne.'
+    ],
+    finalAnswer: 'Die Hauptstadt von Australien ist Canberra.'
+  });
+
+  assert.match(answer, /^Die Hauptstadt von Australien ist Canberra\.$/);
+});
+
+test('offline chairman scenario gives a clear and reasoned recommendation', async () => {
+  const question = 'Soll ich für tägliche kurze Stadtwege das Fahrrad oder das Auto nehmen?';
+  const answer = await runOfflineChairmanScenario({
+    question,
+    answers: [
+      'Für kurze Stadtwege ist das Fahrrad meist schneller, günstiger und bewegungsfördernd.',
+      'Das Fahrrad vermeidet Parkplatzsuche; das Auto ist vor allem bei schwerer Last sinnvoll.'
+    ],
+    finalAnswer: 'Nimm für deine täglichen kurzen Stadtwege das Fahrrad: Es ist meist günstiger, erleichtert die Parkplatzsuche und bringt regelmäßige Bewegung. Nutze das Auto nur, wenn du schwere Lasten transportierst oder die Bedingungen das Radfahren unsicher machen.'
+  });
+
+  assert.match(answer, /Nimm[^.]*Fahrrad/i);
+  assert.match(answer, /günstiger|Parkplatzsuche|Bewegung/i);
+});
+
+test('offline chairman scenario expresses issue-specific uncertainty on a controversial question', async () => {
+  const question = 'Sollte eine Stadt private Autos vollständig aus dem Zentrum verbannen?';
+  const answer = await runOfflineChairmanScenario({
+    question,
+    answers: [
+      'Ein Verbot senkt Lärm und Emissionen, braucht aber Ausnahmen für Menschen mit Behinderung und Lieferverkehr.',
+      'Die Wirkung hängt von gutem Nahverkehr, sicheren Radwegen und praktikablen Übergangsregeln ab.'
+    ],
+    finalAnswer: 'Ein vollständiges Verbot ist nicht pauschal sinnvoll. Ob es der Stadt nützt, hängt vor allem von verlässlichem Nahverkehr und sicheren Alternativen ab. Sinnvoller ist häufig eine schrittweise autofreie Zone mit klaren Ausnahmen für Menschen mit Behinderung, Rettungsdienste und notwendigen Lieferverkehr sowie einer überprüfbaren Übergangsphase.'
+  });
+
+  assert.match(answer, /nicht pauschal|hängt[^.]*ab/i);
+  assert.match(answer, /Ausnahmen|Übergangsphase/i);
+});
+
 test('answer progress events stream before answer promises settle', async () => {
   const dbPath = path.join(os.tmpdir(), `llm-council-stream-${Date.now()}-${Math.random()}.db`);
   const store = new CouncilStore(createDb(dbPath));
