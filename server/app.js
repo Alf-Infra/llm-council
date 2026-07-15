@@ -74,6 +74,31 @@ export function createApp(options = {}) {
     const normalized = normalizeRunRequest(req.body, config);
     if (!normalized.ok) return res.status(400).json({ errors: normalized.errors });
 
+    const selectedModels = [
+      ...normalized.value.councilModels.map((item) => item.model),
+      normalized.value.chairmanModel.model
+    ];
+    let modelValidation;
+    try {
+      modelValidation = await catalog.validateSelection(selectedModels);
+    } catch (_error) {
+      return res.status(502).json({ error: 'Modellvalidierung ist derzeit nicht verfügbar.' });
+    }
+    if (modelValidation.length !== selectedModels.length || modelValidation.some((item) => !item.ok)) {
+      return res.status(422).json({
+        error: 'Die Modellauswahl ist nicht vollständig gültig.',
+        results: selectedModels.map((model, index) => {
+          const result = modelValidation[index];
+          return {
+            model,
+            ok: Boolean(result?.ok),
+            canonicalSlug: result?.canonicalSlug || null,
+            error: result?.error || 'Modell konnte nicht validiert werden.'
+          };
+        })
+      });
+    }
+
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',

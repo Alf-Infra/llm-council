@@ -70,7 +70,8 @@ test('POST request body close does not abort an open SSE run', async () => {
     dbPath: path.join(os.tmpdir(), `llm-council-app-${Date.now()}-${Math.random()}.db`),
     config: loadRuntimeConfig(),
     provider: { chat: async () => { throw new Error('should not call provider'); } },
-    orchestrator
+    orchestrator,
+    catalog: permissiveCatalog()
   });
   const server = app.listen(0);
   await once(server, 'listening');
@@ -84,6 +85,77 @@ test('POST request body close does not abort an open SSE run', async () => {
     assert.equal(response.status, 200);
     const events = parseSse(await response.text());
     assert.deepEqual(events.map((event) => event.type), ['run_started', 'stage', 'run_complete']);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /api/runs validates every council model and chairman before side effects', async () => {
+  const store = new CouncilStore(createDb(path.join(os.tmpdir(), `llm-council-validation-${Date.now()}-${Math.random()}.db`)));
+  const checked = [];
+  let orchestratorCalls = 0;
+  const catalog = {
+    async validateSelection(ids) {
+      checked.push(...ids);
+      return ids.map((id) => ({
+        requestedId: id,
+        ok: id !== 'vendor/expired',
+        canonicalSlug: id === 'vendor/expired' ? null : `${id}@canonical`,
+        error: id === 'vendor/expired' ? 'Modell ist abgelaufen.' : null
+      }));
+    }
+  };
+  const app = createApp({
+    config: loadRuntimeConfig(),
+    store,
+    catalog,
+    provider: { chat: async () => { throw new Error('provider must not be called'); } },
+    orchestrator: { async *run() { orchestratorCalls += 1; yield { type: 'run_complete' }; } }
+  });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const request = openRouterRunRequest('ephemeral-key');
+    request.councilModels[1].model = 'vendor/expired';
+    const response = await fetch(`${base}/api/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request)
+    });
+    const body = await response.json();
+    assert.equal(response.status, 422);
+    assert.deepEqual(checked, ['openrouter/a', 'vendor/expired', 'openrouter/chair']);
+    assert.equal(body.results.length, 3);
+    assert.equal(body.results[1].error, 'Modell ist abgelaufen.');
+    assert.equal(orchestratorCalls, 0);
+    assert.deepEqual(store.listConversations(), []);
+    assert.doesNotMatch(JSON.stringify(body), /ephemeral-key/);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /api/runs starts only after the complete catalog selection is valid', async () => {
+  let checked = null;
+  let receivedInput = null;
+  const app = createApp({
+    dbPath: path.join(os.tmpdir(), `llm-council-valid-selection-${Date.now()}-${Math.random()}.db`),
+    config: loadRuntimeConfig(),
+    catalog: { async validateSelection(ids) { checked = ids; return ids.map((id) => ({ requestedId: id, ok: true, canonicalSlug: id })); } },
+    provider: { chat: async () => { throw new Error('unused'); } },
+    orchestrator: { async *run(input) { receivedInput = input; yield { type: 'run_started', runId: 'validated-run' }; yield { type: 'run_complete', runId: 'validated-run' }; } }
+  });
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const response = await fetch(`${base}/api/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(openRouterRunRequest('temporary'))
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(checked, ['openrouter/a', 'openrouter/b', 'openrouter/chair']);
+    assert.equal(receivedInput.councilModels.length, 2);
+    assert.equal(receivedInput.chairmanModel.model, 'openrouter/chair');
+    assert.deepEqual(parseSse(await response.text()).map((event) => event.type), ['run_started', 'run_complete']);
   } finally {
     server.close();
   }
@@ -104,7 +176,8 @@ test('real SSE client disconnect aborts and persists a running council run', asy
     config: loadRuntimeConfig(),
     store,
     provider,
-    orchestrator
+    orchestrator,
+    catalog: permissiveCatalog()
   });
   const server = app.listen(0);
   await once(server, 'listening');
@@ -304,7 +377,7 @@ test('OpenRouter run request uses provider context without persisting API key', 
     'openrouter/b': ['Antwort B', review, 'Verbessert B', review],
     'openrouter/chair': ['Finale Antwort']
   });
-  const app = createApp({ config: loadRuntimeConfig(), store, provider });
+  const app = createApp({ config: loadRuntimeConfig(), store, provider, catalog: permissiveCatalog() });
   const server = app.listen(0);
   await once(server, 'listening');
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -401,6 +474,14 @@ function openRouterRunRequest(apiKey) {
       { id: 'depth', weight: 1 },
       { id: 'usefulness', weight: 1 }
     ]
+  };
+}
+
+function permissiveCatalog() {
+  return {
+    async validateSelection(ids) {
+      return ids.map((id) => ({ requestedId: id, ok: true, canonicalSlug: id, error: null }));
+    }
   };
 }
 
